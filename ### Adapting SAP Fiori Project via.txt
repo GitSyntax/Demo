@@ -1,0 +1,56 @@
+### Adapting SAP Fiori Project via VS Code
+
+#### Prerequisites
+- **Visual Studio Code** installed on your local machine [[1]](https://me.sap.com/notes/3208558)
+- **SAP Fiori Tools extension pack** installed in VS Code (follow the [Set Up SAP Fiori Tools tutorial](https://developers.sap.com/tutorials/fiori-tools-vscode-setup.html)) [[2]](https://community.sap.com/t5/technology-blog-posts-by-sap/introducing-sapui5-adaptation-projects-in-visual-studio-code/ba-p/13580992)
+- Access to an **SAP system** (on-premise or SAP BTP ABAP Environment) containing the standard Fiori app you want to adapt [[3]](https://help.sap.com/docs/SAP_FIORI_tools/17d50220bcd848aa854c9c182d65b699/072f566ed1d845b6aa41cb01057700d5.html)
+- Minimum **SAPUI5 version 1.72** on the target system [[2]](https://community.sap.com/t5/technology-blog-posts-by-sap/introducing-sapui5-adaptation-projects-in-visual-studio-code/ba-p/13580992)
+- Note: The standard app must have `flexEnabled: true` set — if not, you will receive the error *"This application is not enabled for adaptation"* [[4]](https://me.sap.com/notes/3627394)
+
+---
+
+#### Steps to Adapt the Project
+
+**1. Open VS Code and Launch the Adaptation Project Generator**
+- Open Visual Studio Code
+- Open the **Command Palette** (`Ctrl+Shift+P`) and execute the command:
+  `Fiori: Open Adaptation Project Generator`
+- Alternatively, open the Command Palette and execute `Fiori: Open Template Wizard`, then click the **Adaptation Project** tile [[3]](https://help.sap.com/docs/SAP_FIORI_tools/17d50220bcd848aa854c9c182d65b699/072f566ed1d845b6aa41cb01057700d5.html)
+
+**2. Configure the Project and SAP System Connection**
+- In the wizard, enter a **name** for the project and a **title** for the application [[3]](https://help.sap.com/docs/SAP_FIORI_tools/17d50220bcd848aa854c9c182d65b699/072f566ed1d845b6aa41cb01057700d5.html)
+- In the **Namespace** field (after `customer.`), enter the name of your project 
+- Click **Next**
+- Choose the **SAPUI5 version** from the dropdown list
+- **Select a system** (your on-premise or cloud ABAP system)
+- Choose the **application** you want to adapt [[3]](https://help.sap.com/docs/SAP_FIORI_tools/17d50220bcd848aa854c9c182d65b699/072f566ed1d845b6aa41cb01057700d5.html)
+
+**3. Generate and Modify UI5 Components/Views**
+- Click **Finish** to generate the adaptation project 
+- Optionally, select **Add Deployment Configuration** if you want to configure deployment settings at this stage [[3]](https://help.sap.com/docs/SAP_FIORI_tools/17d50220bcd848aa854c9c182d65b699/072f566ed1d845b6aa41cb01057700d5.html)
+- The adaptation project will contain only the **delta changes** you make — the original standard app remains untouched [[5]](https://help.sap.com/docs/SAP%20Business%20Application%20Studio/584e0bcbfd4a4aff91c815cefa0bce2d/ada9567b767941aba8d49fdb4fdedea7.html)
+- Use the **SAPUI5 Visual Editor** or code-based editors to make your adaptations (e.g., add/hide/rearrange fields, rename labels, add extensions, replace OData services, add local annotation files) [[6]](https://learning.sap.com/courses/ui-development-with-sap-fiori/extending-sap-fiori-apps-with-sapui5-flexibility_e572b71c-269c-4b5b-b250-3a6e8f33dbe5) [[7]](https://community.sap.com/t5/technology-blog-posts-by-sap/extending-sap-delivered-sap-fiori-elements-apps-using-adaptation-projects/ba-p/13538593)
+- All changes are stored as SAPUI5 flexibility changes in the project's `webapp/changes` folder [[8]](https://help.sap.com/docs/bas/developing-sap-fiori-app-in-sap-business-application-studio/deploy-adaptation-project-to-cloud-foundry?locale=en-US&state=PRODUCTION&version=Cloud&q=flexible%20programming%20model)
+
+**4. Preview and Test Changes**
+- To preview your adaptation project, use the **Previewing an Adaptation Project** function available via the Application Information page [[3]](https://help.sap.com/docs/SAP_FIORI_tools/17d50220bcd848aa854c9c182d65b699/072f566ed1d845b6aa41cb01057700d5.html)
+- Note: In VS Code, the preview opens in a **separate browser tab** (unlike SAP Business Application Studio where it opens inline) [[2]](https://community.sap.com/t5/technology-blog-posts-by-sap/introducing-sapui5-adaptation-projects-in-visual-studio-code/ba-p/13580992)
+- Use the **Application Information page** to find all relevant commands and links in one place 
+
+**5. Deploy the Updated Project**
+- Deploy the adaptation project to the **same system** as the original app [[5]](https://help.sap.com/docs/SAP%20Business%20Application%20Studio/584e0bcbfd4a4aff91c815cefa0bce2d/ada9567b767941aba8d49fdb4fdedea7.html)
+- For on-premise systems, deploy to the **ABAP Repository** using the deployment configuration [[3]](https://help.sap.com/docs/SAP_FIORI_tools/17d50220bcd848aa854c9c182d65b699/072f566ed1d845b6aa41cb01057700d5.html)
+- After deployment, register the app variant in **SAP Fiori Launchpad** by creating a new target mapping with a unique **Semantic Object and Action** pair in transaction `/UI2/FLPD_CUST` [[9]](https://me.sap.com/notes/3074554)
+- Assign the relevant catalog and group to a role available to your users, then refresh the Fiori Launchpad to see the new tile [[9]](https://me.sap.com/notes/3074554)
+
+---
+
+> ⚠️ **Important Restrictions when using VS Code** (compared to SAP Business Application Studio):
+> - Legacy standard apps not supporting adaptation projects have no fallback to extension projects [[2]](https://community.sap.com/t5/technology-blog-posts-by-sap/introducing-sapui5-adaptation-projects-in-visual-studio-code/ba-p/13580992)
+> - Safe mode is not supported 
+> - There is no automatic update of npm modules for the project 
+> - Despite these restrictions, adaptation projects created in VS Code can be used in productive scenarios [[2]](https://community.sap.com/t5/technology-blog-posts-by-sap/introducing-sapui5-adaptation-projects-in-visual-studio-code/ba-p/13580992)
+
+---
+
+Would you like more detail on any specific step — for example, configuring the deployment to ABAP, working with the SAPUI5 Visual Editor, or setting up the Fiori Launchpad tile?
