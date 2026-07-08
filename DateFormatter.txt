@@ -1,0 +1,6 @@
+function dateToUTC(oDate) {
+		if (!oDate) {
+			return undefined;
+		}
+		return new Date(Date.UTC(oDate.getFullYear(), oDate.getMonth(), oDate.getDate()));
+	}
