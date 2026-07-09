@@ -1,4 +1,9 @@
+
+
 ### Adapting SAP Fiori Project via VS Code
+
+npm -g uninstall @sap/generator-fiori
+npm -g install @sap/generator-fiori
 
 #### Prerequisites
 - **Visual Studio Code** installed on your local machine [[1]](https://me.sap.com/notes/3208558)
