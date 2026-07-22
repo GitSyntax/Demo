@@ -1,0 +1,2724 @@
+------------------------------------------------DEEP Create-----------------------------------------------------------------------
+ 
+ METHOD /iwbep/if_mgw_appl_srv_runtime~create_deep_entity.
+    DATA: lo_message_container TYPE REF TO /iwbep/if_message_container,
+          lv_error_msg         TYPE bapi_msg.
+
+    DATA: BEGIN OF ls_payload_data.
+            INCLUDE TYPE zcl_z_lead_n_opporunit_mpc=>ts_leaddetails.
+    DATA:   NavLeadToInstruction TYPE STANDARD TABLE OF zcl_z_lead_n_opporunit_mpc=>ts_instruction.
+    DATA: END OF ls_payload_data.
+
+    DATA : ls_Customer_data TYPE ztlo_m_customer,
+           ls_main_data     TYPE ztlo_main,
+           ls_Workflow_data TYPE ztlo_workflow.
+
+    DATA:  lt_intruction   TYPE STANDARD TABLE OF zcl_z_lead_n_opporunit_mpc=>ts_instruction.
+    DATA : lv_pernr        TYPE ess_emp-employeenumber,
+           lv_message_text TYPE bapi_msg.
+
+    DATA : lv_seq       TYPE seqnr_no.
+    DATA : lv_status    TYPE c LENGTH 2.
+
+    DATA: lt_Instruct TYPE STANDARD TABLE OF ztlo_cust_inst,
+          ls_Instruct TYPE ztlo_cust_inst.
+
+    TRY.
+        io_data_provider->read_entry_data(
+          IMPORTING
+            es_data = ls_payload_data ).
+
+      CATCH: /iwbep/cx_mgw_tech_exception INTO DATA(lcx_mgw_tech_exception).
+    ENDTRY.
+
+    lt_intruction = CORRESPONDING #( ls_payload_data-navleadtoinstruction ).
+
+    CALL METHOD me->/iwbep/if_mgw_conv_srv_runtime~get_message_container
+      RECEIVING
+        ro_message_container = lo_message_container.
+
+    CALL FUNCTION 'HR_GETEMPLOYEEDATA_FROMUSER'
+      EXPORTING
+        username                  = sy-uname
+      IMPORTING
+        employeenumber            = lv_pernr
+      EXCEPTIONS
+        user_not_found            = 1
+        countrygrouping_not_found = 2
+        infty_not_found           = 3
+        OTHERS                    = 4.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+    GET TIME STAMP FIELD DATA(lv_local_timestamp).
+
+    IF ls_payload_data-zzreqno IS INITIAL.
+
+      SELECT SINGLE FROM ztlo_main
+         FIELDS MAX( zzreqno )
+         INTO @DATA(lv_Req).
+
+      IF lv_Req IS NOT INITIAL.
+        IF lv_Req(6) = sy-datum(6).
+          lv_Req += 1.
+        ELSE.
+          lv_Req = |{ sy-datum(6) }000001|.
+        ENDIF.
+        CONDENSE lv_req.
+      ELSE.
+        lv_Req = |{ sy-datum(6) }000001|.
+      ENDIF.
+      lv_seq = '1'.
+    ELSE.
+
+      SELECT SINGLE FROM ztlo_workflow
+         FIELDS MAX( zzseqno )
+         WHERE zzreqno = @ls_payload_data-zzreqno
+         INTO @lv_seq.
+
+      lv_Req = ls_payload_data-zzreqno.
+      lv_seq += 1.
+    ENDIF.
+
+    IF ls_payload_data-zzcust_id IS INITIAL.
+
+      SELECT SINGLE FROM ztlo_m_customer
+        FIELDS MAX( zzcust_id )
+        INTO @DATA(lv_custId).
+
+      IF lv_custId IS NOT INITIAL.
+*        lv_custId += '1'.
+*        lv_custId = CONV NUM( lv_custId ) + 1.
+        " Remove the leading 'c' and convert the numeric part to an integer
+        lv_custId = lv_custId+1(*). " Starting from index 1 to convert the numeric part
+        lv_custId += 1.
+        lv_custId = |C{ lv_custId }|.
+      ELSE.
+        lv_custId = |C{ sy-datum+2(2) }0000001|.
+      ENDIF.
+    ELSE.
+      lv_custId = ls_payload_data-zzcust_id.
+    ENDIF.
+
+    IF ls_payload_data-action = 'D'.
+      lv_status = '10'.
+    ELSE.
+      lv_status = '15'.
+    ENDIF.
+
+    "Modify table ZTLO_M_CUSTOMER.
+
+    CALL FUNCTION 'ENQUEUE_E_TABLE'
+      EXPORTING
+        mode_rstable   = 'E'
+        tabname        = 'ztlo_m_customer'
+      EXCEPTIONS
+        foreign_lock   = 1
+        system_failure = 2
+        OTHERS         = 3.
+
+    IF sy-subrc <> 0.
+    ENDIF.
+
+    ls_customer_data-zzcust_id        = lv_custId.
+    ls_customer_data-zzlead_name      = ls_payload_data-zzlead_name.
+    ls_customer_data-zzl_contact_no   = ls_payload_data-zzl_contact_no.
+    ls_customer_data-zzalt_conc_no    = ls_payload_data-zzalt_conc_no.
+    ls_customer_data-zz_lead_email    = ls_payload_data-zz_lead_email.
+    ls_customer_data-zzcompy_name     = ls_payload_data-zzcompy_name.
+    ls_customer_data-zzaddr           = ls_payload_data-zzaddr.
+    ls_customer_data-zzlandmark       = ls_payload_data-zzlandmark.
+    ls_customer_data-zzpincode        = ls_payload_data-zzpincode.
+    ls_customer_data-zzcity           = ls_payload_data-zzcity.
+    ls_customer_data-zzdistrict       = ls_payload_data-zzdistrict.
+    ls_customer_data-zzstate          = ls_payload_data-zzstate.
+    ls_customer_data-zzcountry        = ls_payload_data-zzcountry.
+    ls_customer_data-zzcompy_phone    = ls_payload_data-zzcompy_phone.
+    ls_customer_data-zzcompy_email    = ls_payload_data-zzcompy_email.
+    ls_customer_data-zzpan            = ls_payload_data-zzpan.
+    ls_customer_data-zzgstin          = ls_payload_data-zzgstin.
+    ls_customer_data-zzchanged_by     = lv_pernr.
+    ls_customer_data-zzchanged_on     = lv_local_timestamp.
+
+    MODIFY ztlo_m_customer FROM ls_customer_data.
+
+
+    COMMIT WORK AND WAIT.
+
+    CALL FUNCTION 'DEQUEUE_E_TABLE'
+      EXPORTING
+        mode_rstable = 'E'
+        tabname      = 'ztlo_m_customer'.
+
+    IF sy-subrc <> 0.
+    ENDIF.
+
+    "Modify table ZTLO_MAIN.
+
+    CALL FUNCTION 'ENQUEUE_E_TABLE'
+      EXPORTING
+        mode_rstable   = 'E'
+        tabname        = 'ZTLO_MAIN'
+      EXCEPTIONS
+        foreign_lock   = 1
+        system_failure = 2
+        OTHERS         = 3.
+
+    IF sy-subrc <> 0.
+    ENDIF.
+
+    ls_main_data-zzreqno            = lv_Req.
+    ls_main_data-zzcust_id          = lv_custId.
+    ls_main_data-zzlead_name        = ls_payload_data-zzlead_name.
+    ls_main_data-zzpreloc           = ls_payload_data-zzpreloc.
+    ls_main_data-zzprelocothr          = ls_payload_data-zzprelocothr.
+    ls_main_data-zzsourcecode       = ls_payload_data-zzsourcecode.
+    ls_main_data-zzcampaigncode     = ls_payload_data-zzcampaigncode.
+    ls_main_data-zzservicecode      = ls_payload_data-zzservicecode.
+    ls_main_data-zzother_service    = ls_payload_data-zzother_service.
+    ls_main_data-zzreference_pernr  = ls_payload_data-zzreference_pernr.
+
+    ls_main_data-zzserviceothr      = ls_payload_data-zzserviceothr.
+    ls_main_data-zzsourceothr       = ls_payload_data-zzsourceothr.
+    ls_main_data-zzothrservicetyp   = ls_payload_data-zzothrservicetyp.
+
+
+    ls_main_data-zzcommodityarea    = ls_payload_data-zzcommodityarea.
+    ls_main_data-zzbags             = ls_payload_data-zzbags.
+    ls_main_data-zztroad_from       = ls_payload_data-zztroad_from.
+    ls_main_data-zztroad_to         = ls_payload_data-zztroad_to.
+    ls_main_data-zztrail_from       = ls_payload_data-zztrail_from.
+    ls_main_data-zztrail_to         = ls_payload_data-zztrail_to.
+    ls_main_data-zro                = ls_payload_data-zro.
+
+
+    ls_main_data-zzstatus           = lv_status.
+    ls_main_data-zzsentto           = lv_pernr.
+    ls_main_data-zzchanged_by       = lv_pernr.
+    ls_main_data-zzchanged_on       = lv_local_timestamp.
+    ls_main_data-zzcreated_by       = lv_pernr.
+    ls_main_data-zzcreated_on       = lv_local_timestamp.
+
+    data: lv_quan type P LENGTH 10 DECIMALS 2.
+    lv_quan = ls_payload_data-zquant.
+
+    ls_main_data-zquan = lv_quan. "shubham 13.04.2026
+
+    MODIFY ztlo_main FROM ls_main_data.
+
+    COMMIT WORK AND WAIT.
+
+    CALL FUNCTION 'DEQUEUE_E_TABLE'
+      EXPORTING
+        mode_rstable = 'E'
+        tabname      = 'ZTLO_MAIN'.
+
+    IF sy-subrc <> 0.
+    ENDIF.
+
+    "Modify table ZTLO_WORKFLOW.
+
+    CALL FUNCTION 'ENQUEUE_E_TABLE'
+      EXPORTING
+        mode_rstable   = 'E'
+        tabname        = 'ZTLO_WORKFLOW'
+      EXCEPTIONS
+        foreign_lock   = 1
+        system_failure = 2
+        OTHERS         = 3.
+
+    IF sy-subrc <> 0.
+    ENDIF.
+
+    ls_workflow_data-zzseqno        = lv_seq.
+    ls_workflow_data-zzreqno        = lv_req.
+    ls_workflow_data-zzcust_id      = lv_custid.
+    ls_workflow_data-zzsentto       = lv_pernr.
+    ls_workflow_data-zzstatus       = lv_status.
+    ls_workflow_data-zzremarks      = ls_payload_data-zzremarks.
+    ls_workflow_data-zzchanged_by   = lv_pernr.
+    ls_workflow_data-zzchanged_on   = lv_local_timestamp.
+
+    MODIFY ztlo_workflow FROM ls_workflow_data.
+
+    COMMIT WORK AND WAIT.
+
+    CALL FUNCTION 'DEQUEUE_E_TABLE'
+      EXPORTING
+        mode_rstable = 'E'
+        tabname      = 'ZTLO_WORKFLOW'.
+
+    IF sy-subrc <> 0.
+    ENDIF.
+
+    LOOP AT lt_intruction INTO DATA(ls_instruction).
+
+      ls_instruct-zzseqno       = sy-tabix.
+      ls_instruct-zzreqno       = lv_Req.
+      ls_instruct-zztext        = ls_instruction-zztext.
+      ls_instruct-zzoptions     = ls_instruction-zzoptions.
+      ls_instruct-zzremarks     = ls_instruction-zzremarks.
+      ls_instruct-zzfrom        = ls_instruction-zzfrom.
+      ls_instruct-zzto          = ls_instruction-zzto.
+      ls_instruct-zzchanged_by  = lv_pernr.
+      ls_instruct-zzchanged_on  = lv_local_timestamp.
+      APPEND ls_instruct TO lt_instruct.
+      CLEAR ls_instruct.
+    ENDLOOP.
+
+    "Modify table ztlo_cust_inst.
+
+    CALL FUNCTION 'ENQUEUE_E_TABLE'
+      EXPORTING
+        mode_rstable   = 'E'
+        tabname        = 'ztlo_cust_inst'
+      EXCEPTIONS
+        foreign_lock   = 1
+        system_failure = 2
+        OTHERS         = 3.
+
+    IF sy-subrc <> 0.
+    ENDIF.
+
+
+    MODIFY ztlo_cust_inst FROM TABLE lt_instruct.
+
+    COMMIT WORK AND WAIT.
+
+    CALL FUNCTION 'DEQUEUE_E_TABLE'
+      EXPORTING
+        mode_rstable = 'E'
+        tabname      = 'ztlo_cust_inst'.
+
+    IF sy-subrc <> 0.
+    ENDIF.
+
+    IF sy-subrc EQ 0.
+
+      lv_message_text = |Lead: { lv_req } { COND string(
+            WHEN ls_payload_data-action = 'D' THEN 'saved'
+            WHEN ls_payload_data-action = 'S' THEN 'created'
+            ELSE 'processed') } successfully.|.
+
+      CALL METHOD lo_message_container->add_message_text_only
+        EXPORTING
+          iv_msg_type               = /iwbep/cl_cos_logger=>success
+          iv_msg_text               = lv_message_text
+          iv_add_to_response_header = abap_true.
+
+    ENDIF.
+
+    me->copy_data_to_ref(
+    EXPORTING
+      is_data = ls_payload_data
+    CHANGING
+      cr_data = er_deep_entity ).
+
+
+  ENDMETHOD.
+
+
+-----------------------------------------Create Stream---------------------------------------------------------
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~create_stream.
+
+    DATA: lv_file         TYPE string,
+          lv_solix_length TYPE i,
+          lt_content      TYPE TABLE OF tbl1024, "content OF FILE STORAGE.
+          gv_out          TYPE sapb-length,
+          lv_extensions   TYPE toadv-doc_type.
+
+    DATA: lv_arc_doc_id TYPE saeardoid.
+    DATA: lv_objectid TYPE sapb-sapobjid.
+
+    DATA: lt_content1 TYPE solix_tab,
+          lt_data     TYPE soli_tab,
+          lt_objhead  TYPE STANDARD TABLE OF soli,
+          lt_binrel   TYPE  gbinrel,
+          ls_object   TYPE borident,
+          ls_obj_data TYPE sood1,
+          ls_objhead  TYPE soli,
+          ls_fol_id   TYPE soodk,
+          ls_obj_id   TYPE soodk,
+          ls_folmem_k TYPE sofmk, "folder content DATA
+          ls_note     TYPE borident. " bor OBJECT IDENTIFIER..
+
+    DATA: lv_ep_note    TYPE borident-objkey. "“bor OBJECT KEY
+    DATA: lv_reqno      TYPE reqno. "
+    DATA: ls_attachment TYPE ztlo_attachment.
+
+    " Instantiate the Message Container
+    DATA: lo_msg TYPE REF TO /iwbep/if_message_container.
+    DATA: lo_message_container TYPE REF TO /iwbep/if_message_container.
+    DATA: lv_object_id TYPE sapb-sapobjid.
+
+    DATA: lt_components TYPE STANDARD TABLE OF http_comp.
+    DATA: lv_file2 TYPE toaat-filename.
+
+    CONSTANTS:
+      lc_archivid  TYPE toaar-archiv_id VALUE 'ZC',     "Content-Repository
+      lc_arobject  TYPE toaom-ar_object VALUE 'ZZLO_APP',
+      lc_sapobject TYPE toaom-sap_object VALUE 'ZSBO_LO',
+      lc_descr     TYPE toaat-descr VALUE 'BUS',
+      lc_doctype   TYPE toadd-doc_type VALUE '*',
+      lc_objtyp    TYPE swo_objtyp VALUE 'MESSAGE'.
+
+    IF iv_entity_name = 'Attachment'.
+
+      IF iv_slug IS NOT INITIAL.
+        SPLIT iv_slug AT '/' INTO DATA(lv_req) DATA(lv_file_name) DATA(lv_flag).
+        lv_file = lv_file_name.
+        lv_reqno = lv_req.
+      ENDIF.
+
+      CLEAR: lv_extensions.
+
+      IF sy-subrc = 0.
+        gv_out        = lv_solix_length.
+
+        DATA(p_file_rev) = reverse( lv_file ).
+        SPLIT p_file_rev AT '\' INTO DATA(fname) DATA(rest).
+        DATA(p_file_fin) = reverse( fname ).
+        DATA(extension_rev) = reverse( p_file_fin ).
+        SPLIT extension_rev AT '.' INTO DATA(ext) DATA(rest_ext).
+        DATA(ext_fin) = reverse( ext ).
+
+        lv_extensions = ext_fin.
+
+        TRANSLATE lv_extensions TO UPPER CASE.
+
+        lv_objectid = 'LO' && |_| && lv_reqno.
+
+        lv_file2 = lv_file.
+
+      ENDIF.
+
+      GET TIME STAMP FIELD DATA(lv_local_timestamp).
+
+      CALL METHOD zgclhr_common_utility=>get_logged_employee
+        EXPORTING
+          iv_usrid = CONV #( sy-uname )
+        IMPORTING
+          ev_pernr = DATA(lv_login_pernr)
+        EXCEPTIONS
+          retcd    = 1
+          OTHERS   = 2.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception.
+      ENDIF.
+
+
+      CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'             " Convert file content from string to Binary
+        EXPORTING
+*         buffer        = CONV xstring( is_media_resource-value )
+          buffer        = is_media_resource-value
+        IMPORTING
+          output_length = lv_solix_length
+        TABLES
+          binary_tab    = lt_content. "binary.
+
+      IF sy-subrc = 0.
+        gv_out        = lv_solix_length.
+
+        CALL FUNCTION 'ARCHIVOBJECT_CREATE_TABLE'
+          EXPORTING
+            archiv_id                = lc_archivid
+            document_type            = lv_extensions
+            length                   = gv_out
+          IMPORTING
+            archiv_doc_id            = lv_arc_doc_id
+          TABLES
+            binarchivobject          = lt_content
+            components               = lt_components
+          EXCEPTIONS
+            error_archiv             = 1
+            error_communicationtable = 2
+            error_kernel             = 3
+            OTHERS                   = 4.
+
+
+
+        CALL FUNCTION 'ARCHIV_CONNECTION_INSERT'
+          EXPORTING
+            archiv_id             = lc_archivid
+            arc_doc_id            = lv_arc_doc_id
+            ar_object             = lc_arobject         "ZZHR_APP
+            object_id             = lv_objectid
+            sap_object            = lc_sapobject        "ZHR_BUS_01
+            doc_type              = lv_extensions
+            filename              = lv_file2
+            descr                 = lc_descr
+            creator               = sy-uname
+          EXCEPTIONS
+            error_connectiontable = 1
+            OTHERS                = 2.
+
+
+
+        "Modify table ZTLO_M_CUSTOMER.
+
+        CALL FUNCTION 'ENQUEUE_E_TABLE'
+          EXPORTING
+            mode_rstable   = 'E'
+            tabname        = 'ZTLO_ATTACHMENT'
+          EXCEPTIONS
+            foreign_lock   = 1
+            system_failure = 2
+            OTHERS         = 3.
+
+        IF sy-subrc <> 0.
+        ENDIF.
+
+        ls_attachment-zzreqid       = lv_req.
+        ls_attachment-zzarc_doc_id  = lv_arc_doc_id.
+        ls_attachment-zzfilename    = lv_file_name.
+        ls_attachment-zzmimetype    = is_media_resource-mime_type.
+        ls_attachment-zzfilesize    = lv_solix_length.
+        ls_attachment-zzcontent     = is_media_resource-value.
+        ls_attachment-zzuploaded_on = lv_local_timestamp.
+        ls_attachment-zzuploaded_by = lv_login_pernr.
+
+        MODIFY ztlo_attachment FROM ls_attachment.
+
+
+
+        COMMIT WORK AND WAIT.
+
+        CALL FUNCTION 'DEQUEUE_E_TABLE'
+          EXPORTING
+            mode_rstable = 'E'
+            tabname      = 'ztlo_m_customer'.
+
+        IF sy-subrc <> 0.
+        ENDIF.
+
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+
+----------------------------------------------------get stream------------------------------------------------------
+
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~get_stream.
+
+    " Get IDs from keys
+    DATA(lv_docid) = VALUE #( it_key_tab[ name = 'ArcDocId' ]-value OPTIONAL ).
+
+    TYPES: tt_toaat TYPE STANDARD TABLE OF toaat WITH DEFAULT KEY.
+
+    DATA : rv_mime_type TYPE mimetypes-type.
+
+    DATA :et_connections TYPE ztthr_utility_get_attachment,
+          es_stream      TYPE ty_s_media_resource,
+          e_filename     TYPE filename_al11.
+
+    DATA:lv_mimetype  TYPE mimetypes-type,
+         lv_mimetype1 TYPE mimetypes-type,
+         lv_filename  TYPE string.
+
+    DATA: ls_meta   TYPE sfpmetadata,
+          lx_fpex   TYPE REF TO cx_fp_runtime,
+          lo_fp     TYPE REF TO if_fp,
+          lo_pdfobj TYPE REF TO if_fp_pdf_object.
+
+    DATA: lv_form TYPE xstring.
+    CONSTANTS: "lc_archivid    TYPE toaar-archiv_id VALUE 'ZC' commented by shubhamb on 12.09.2025 for Content Rep. ID changes
+      lc_doc_type    TYPE toaom-ar_object VALUE 'ZZLO_APP',
+      lc_object_type TYPE toaom-sap_object VALUE 'ZSBO_LO'.
+
+    DATA(lt_connections) = VALUE connection_tab( ).
+    DATA(lt_attributes)  = VALUE tt_toaat( ).
+    DATA: lc_archivid    TYPE toaar-archiv_id.    "added by shubhamb on 12.09.2025 for Content Rep. ID changes
+
+    SELECT SINGLE archiv_id
+       INTO @lc_archivid
+      FROM toa01
+      WHERE arc_doc_id = @lv_docid.
+
+
+    CALL FUNCTION 'ARCHIV_GET_CONNECTIONS'
+      EXPORTING
+        objecttype      = lc_object_type
+*       object_id       = ''
+        documenttype    = lc_doc_type
+        archiv_id       = lc_archivid
+        arc_doc_id      = CONV toav0-arc_doc_id( lv_docid )
+*       from_ar_date    = ''
+*       until_ar_date   = ''
+      TABLES
+        connections     = lt_connections
+        file_attributes = lt_attributes
+      EXCEPTIONS
+        nothing_found   = 1
+        OTHERS          = 2.
+    IF sy-subrc = 0 AND lt_connections IS NOT INITIAL.
+      SELECT ar_object,
+             objecttext
+        FROM toasp INTO TABLE @DATA(lt_object_name) FOR ALL ENTRIES IN @lt_connections
+                              WHERE ar_object = @lt_connections-ar_object
+                                AND language  = @sy-langu.
+      IF lt_connections[] IS NOT INITIAL.
+        LOOP AT lt_connections ASSIGNING FIELD-SYMBOL(<ls_connections>).
+          DATA(lt_binary_1024) = VALUE rmps_t_1024( ).
+          DATA(lv_doc_type) = CONV toadd-doc_type( <ls_connections>-ar_object ).
+          CALL FUNCTION 'ARCHIVOBJECT_GET_TABLE'
+            EXPORTING
+              archiv_id                = <ls_connections>-archiv_id
+              document_type            = lv_doc_type
+              archiv_doc_id            = <ls_connections>-arc_doc_id
+              all_components           = abap_true
+              signature                = abap_true
+            TABLES
+              binarchivobject          = lt_binary_1024
+            EXCEPTIONS
+              error_archiv             = 1
+              error_communicationtable = 2
+              error_kernel             = 3
+              OTHERS                   = 4.
+          IF sy-subrc = 0.
+            DATA(lt_binary_data) = cl_rmps_general_functions=>convert_1024_to_255( lt_binary_1024[] ).
+          ENDIF.
+          TRY.
+              DATA(ls_attributes) = VALUE #( lt_attributes[ arc_doc_id = <ls_connections>-arc_doc_id ] OPTIONAL ).
+            CATCH cx_sy_itab_line_not_found.
+          ENDTRY.
+
+          CALL FUNCTION 'SDOK_MIMETYPE_GET'
+            EXPORTING
+              extension = <ls_connections>-reserve
+            IMPORTING
+              mimetype  = rv_mime_type.
+          IF rv_mime_type EQ 'application/octet-stream'.      " At backend the mimetype stored is not supported.
+            rv_mime_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'.
+          ELSEIF rv_mime_type EQ 'application/vnd.ms-excel'.
+            rv_mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64'.
+          ENDIF.
+
+
+          et_connections = VALUE #( BASE et_connections ( VALUE #( BASE CORRESPONDING #( <ls_connections> )
+                                                  filename    = ls_attributes-filename
+                                                  creator     = ls_attributes-creator
+                                                  descr       = ls_attributes-descr
+                                                  creatime    = ls_attributes-creatime
+                                                  mimetype    =  rv_mime_type
+                                                  doc_xstring = cl_bcs_convert=>solix_to_xstring( lt_binary_data )
+                                                  binary_data = lt_binary_data
+                                                  object_name = VALUE #( lt_object_name[ ar_object = <ls_connections>-ar_object ] OPTIONAL ) ) ) ).
+        ENDLOOP.
+        READ TABLE et_connections INTO DATA(ls_connections) INDEX 1.
+        IF sy-subrc = 0.
+          lv_form = ls_connections-doc_xstring.
+          es_stream-mime_type = ls_connections-mimetype.
+          lv_mimetype = ls_connections-mimetype.
+          lv_mimetype = ls_connections-reserve.
+          "Set the pdf header
+          TRY.
+              "Create PDF Object.
+              lo_fp = cl_fp=>get_reference( ).
+              lo_pdfobj = lo_fp->create_pdf_object( connection = 'ADS' ).
+              lo_pdfobj->set_document( pdfdata = lv_form ).
+              "Set title.
+              ls_meta-title = 'LO'.
+              lo_pdfobj->set_metadata( metadata = ls_meta ).
+              lo_pdfobj->execute( ).
+              "Get the PDF content back with title
+              lo_pdfobj->get_document( IMPORTING pdfdata = lv_form ).
+            CATCH cx_fp_runtime_internal
+                  cx_fp_runtime_system
+                  cx_fp_runtime_usage INTO lx_fpex.
+              DATA(lv_message) = lx_fpex->get_text( ).
+          ENDTRY.
+          es_stream-mime_type = ls_connections-mimetype.
+          es_stream-value = ls_connections-doc_xstring.
+          e_filename = ls_connections-filename.
+        ENDIF.
+
+        " Set content disposition header for download
+        set_header( is_header = VALUE #(
+          name  = 'Content-Disposition'
+          value = |attachment; filename="{ e_filename }"|
+        ) ).
+
+
+        copy_data_to_ref(
+          EXPORTING
+            is_data = es_stream
+          CHANGING
+            cr_data = er_stream ).
+      ENDIF.
+    ELSE.
+      " Use this for class-based exception:
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_tech_exception
+        EXPORTING
+          textid = /iwbep/cx_mgw_tech_exception=>internal_error.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+-----------------------------entityset--------------------------------------
+
+  METHOD f4_serviceset_get_entityset.
+
+    SELECT * FROM ztlo_m_service INTO CORRESPONDING FIELDS OF TABLE et_entityset.
+    IF sy-subrc = 0.
+      SORT et_entityset.
+      DELETE ADJACENT DUPLICATES FROM et_entityset COMPARING zzcode.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+
+-----------------------------Create--------------------------------------
+
+
+
+  METHOD f4_sourceset_create_entity.
+
+    DATA: lo_message_container        TYPE REF TO /iwbep/if_message_container,
+          /iwbep/if_message_container.
+    DATA:ls_payload_data TYPE zcl_z_lead_n_opporunit_mpc=>ts_f4_source.
+    DATA : ls_source_data TYPE ztlo_m_source.
+    DATA: lv_pernr TYPE ess_emp-employeenumber.
+
+    "get data from fiori payload
+    io_data_provider->read_entry_data( IMPORTING es_data = ls_payload_data ).
+
+    CALL METHOD me->/iwbep/if_mgw_conv_srv_runtime~get_message_container
+      RECEIVING
+        ro_message_container = lo_message_container.
+
+    CALL FUNCTION 'HR_GETEMPLOYEEDATA_FROMUSER'
+      EXPORTING
+        username                  = sy-uname
+      IMPORTING
+        employeenumber            = lv_pernr
+      EXCEPTIONS
+        user_not_found            = 1
+        countrygrouping_not_found = 2
+        infty_not_found           = 3
+        OTHERS                    = 4.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+    GET TIME STAMP FIELD DATA(lv_local_timestamp).
+
+    ls_source_data-zzcode = ls_payload_data-zzcode.
+    ls_source_data-zzdesc = ls_payload_data-zzdesc.
+    ls_source_data-zzchanged_by = lv_pernr.
+    ls_source_data-zzchanged_on = lv_local_timestamp.
+
+    MODIFY ztlo_m_source FROM ls_source_data.
+
+    IF sy-subrc = 0.
+
+      CALL METHOD lo_message_container->add_message_text_only
+        EXPORTING
+          iv_msg_type               = /iwbep/cl_cos_logger=>success
+          iv_msg_text               = 'Source/channel Added Successfully.'
+          iv_add_to_response_header = abap_true.
+
+    ELSE.
+
+      CALL METHOD lo_message_container->add_message_text_only
+        EXPORTING
+          iv_msg_type               = /iwbep/cl_cos_logger=>error
+          iv_msg_text               = 'Error while adding.'
+          iv_add_to_response_header = abap_true.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+----------------------------------------------------------
+
+  METHOD followupset_create_entity.
+    DATA: lo_message_container        TYPE REF TO /iwbep/if_message_container,
+          /iwbep/if_message_container.
+
+    DATA : ls_payload_data TYPE zcl_z_lead_n_opporunit_mpc=>ts_followup.
+    DATA : ls_follow_up TYPE ztlo_follow_up.
+
+    DATA : lv_pernr        TYPE ess_emp-employeenumber,
+           lv_message_text TYPE bapi_msg.
+*    DATA : lv_custId TYPE kunnr.
+
+    DATA : lv_seq TYPE seqnr_no.
+    DATA : lv_status TYPE c LENGTH 2.
+
+    DATA:lv_subject   TYPE string,
+         ls_mailbody  TYPE soli,
+         lt_mailbody  TYPE bcsy_text,
+         it_recipient TYPE ztthr_common_email_recipients,
+         ls_recipient TYPE zshr_common_email_recipients,
+         iv_commit    TYPE flag VALUE 'X',
+         iv_html      TYPE char01 VALUE 'X',
+         lc_x(1)      TYPE c VALUE 'X',
+         lv_string    TYPE string,
+         lv_index     TYPE i.
+
+    DATA: cs_mail_params  TYPE zshr_mail_variable_out.
+
+    DATA(lt_lines) = VALUE tline_tab( ).
+    DATA(lv_name) = VALUE thead-tdname( ).
+
+    DATA: lv_sender TYPE ad_smtpadr,
+          lv_mobile TYPE sysid,
+          lv_var1   TYPE TEXT20,
+          lv_subrc  TYPE syst_subrc,
+          lv_error  TYPE text50.
+
+    DATA: lv_mailf TYPE abap_bool,
+          lv_msgf  TYPE abap_bool,
+          lv_tabf  TYPE abap_bool.
+
+    "get data from payload
+    TRY.
+        io_data_provider->read_entry_data( IMPORTING es_data = ls_payload_data ).
+
+      CATCH: /iwbep/cx_mgw_tech_exception INTO DATA(lcx_mgw_tech_exception).
+
+    ENDTRY.
+
+    CALL METHOD me->/iwbep/if_mgw_conv_srv_runtime~get_message_container
+      RECEIVING
+        ro_message_container = lo_message_container.
+
+    CALL FUNCTION 'HR_GETEMPLOYEEDATA_FROMUSER'
+      EXPORTING
+        username                  = sy-uname
+      IMPORTING
+        employeenumber            = lv_pernr
+      EXCEPTIONS
+        user_not_found            = 1
+        countrygrouping_not_found = 2
+        infty_not_found           = 3
+        OTHERS                    = 4.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+
+    IF ls_payload_data-zzfollowup IS NOT INITIAL
+    AND ls_payload_data-zzremarks IS NOT INITIAL.
+
+      GET TIME STAMP FIELD DATA(lv_local_timestamp).
+
+      SELECT SINGLE
+        FROM ztlo_follow_up
+        FIELDS MAX( zzseqno )
+        WHERE zzreqno = @ls_payload_data-zzreqno
+        INTO @DATA(ls_seq).
+      IF ls_seq IS INITIAL.
+        lv_seq = '1'.
+      ELSE.
+        lv_seq = ls_seq + 1.
+      ENDIF.
+
+*    ls_follow_up-zzseqno        = lv_seq.
+*    ls_follow_up-zzreqno        = ls_payload_data-zzreqno.
+*    ls_follow_up-zzfollowup     = ls_payload_data-zzfollowup.
+*    ls_follow_up-zzremarks      = ls_payload_data-zzremarks.
+*    ls_follow_up-zzchanged_by   = lv_pernr.
+*    ls_follow_up-zzchanged_on   = lv_local_timestamp.
+
+      ls_follow_up = VALUE #(
+        zzseqno      = lv_seq
+        zzreqno      = ls_payload_data-zzreqno
+        zzfollowup   = ls_payload_data-zzfollowup
+        zzremarks    = ls_payload_data-zzremarks
+        zzchanged_by = lv_pernr
+        zzchanged_on = lv_local_timestamp
+      ).
+
+      CALL FUNCTION 'ENQUEUE_E_TABLE'
+        EXPORTING
+          mode_rstable   = 'E'
+          tabname        = 'ztlo_follow_up'
+        EXCEPTIONS
+          foreign_lock   = 1
+          system_failure = 2
+          OTHERS         = 3.
+
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+
+      MODIFY ztlo_follow_up FROM ls_follow_up.
+
+      COMMIT WORK AND WAIT.
+
+      CALL FUNCTION 'DEQUEUE_E_TABLE'
+        EXPORTING
+          mode_rstable = 'E'
+          tabname      = 'ztlo_follow_up'.
+
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+
+      IF sy-subrc = 0.
+        "Send success message to UI
+        lv_message_text = 'Added Successfully'.
+
+        CALL METHOD lo_message_container->add_message_text_only
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>success
+            iv_msg_text               = lv_message_text
+            iv_add_to_response_header = abap_true.
+
+      ELSE.
+        lv_message_text = 'Error while updating'.
+        CALL METHOD lo_message_container->add_message_text_only
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_text               = lv_message_text
+            iv_add_to_response_header = abap_true.
+
+      ENDIF.
+    ENDIF.
+
+    CLEAR: ls_follow_up,lv_seq.
+
+    IF ls_payload_data-zznxtremark IS NOT INITIAL
+    AND ls_payload_data-zznxtfollowup IS NOT INITIAL.
+
+**  Saving next follow up data
+
+      GET TIME STAMP FIELD DATA(lv_local_timestampn).
+
+      SELECT SINGLE
+        FROM ztlo_follow_up
+        FIELDS MAX( zzseqno )
+        WHERE zzreqno = @ls_payload_data-zzreqno
+        INTO @DATA(ls_data).
+
+      IF ls_data IS INITIAL.
+        lv_seq = '1'.
+      ELSE.
+        lv_seq = ls_data + 1.
+      ENDIF.
+
+      ls_follow_up = VALUE #(
+        zzseqno       = lv_seq
+        zzreqno       = ls_payload_data-zzreqno
+        zznxtfollowup = ls_payload_data-zznxtfollowup
+        zznxtremark   = ls_payload_data-zznxtremark
+        zzchanged_by  = lv_pernr
+        zzchanged_on  = lv_local_timestampn
+      ).
+
+      CALL FUNCTION 'ENQUEUE_E_TABLE'
+        EXPORTING
+          mode_rstable   = 'E'
+          tabname        = 'ZTLO_FOLLOW_UP'
+        EXCEPTIONS
+          foreign_lock   = 1
+          system_failure = 2
+          OTHERS         = 3.
+
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+
+      MODIFY ztlo_follow_up FROM ls_follow_up.
+
+      COMMIT WORK AND WAIT.
+
+      CALL FUNCTION 'DEQUEUE_E_TABLE'
+        EXPORTING
+          mode_rstable = 'E'
+          tabname      = 'ZTLO_FOLLOW_UP'.
+
+      IF sy-subrc <> 0.
+        lv_tabf = abap_false.
+      ENDIF.
+
+**Recepient
+      IF ls_payload_data-zzcwcust = 'W'.
+
+        SELECT SINGLE FROM ztlo_workflow
+        FIELDS zzsentto,
+          MAX( zzchanged_on ) AS zzchanged_on
+        WHERE zzreqno = @ls_payload_data-zzreqno
+        AND zzsentto IS NOT INITIAL
+        GROUP BY zzsentto,zzchanged_on
+        INTO @DATA(ls_current).
+        IF sy-subrc = 0 AND ls_current IS NOT INITIAL.
+          SELECT SINGLE FROM zthr_emp_master
+          FIELDS email,
+                 mob_no1
+          WHERE pernr = @ls_current-zzsentto
+          INTO @DATA(ls_cwcm).
+          IF sy-subrc = 0 AND ls_cwcm IS NOT INITIAL.
+            ls_recipient-email_address = ls_cwcm-email.
+            APPEND ls_recipient TO it_recipient.
+            CLEAR: ls_recipient.
+          ENDIF.
+        ENDIF.
+
+        IF ls_payload_data-zzmailmsg = 'M'.
+
+          SELECT SINGLE FROM ztlo_main
+          FIELDS zzlead_name
+          WHERE zzreqno = @ls_payload_data-zzreqno
+          INTO @DATA(lv_leadname).
+
+         CONCATENATE 'Follow-up with Lead' lv_leadname INTO lv_subject SEPARATED BY ':'.
+
+        ENDIF.
+
+        IF ls_payload_data-zzmailmsg = 'S'.
+          lv_mobile = ls_cwcm-mob_no1.
+        ENDIF.
+
+      ENDIF.
+
+      IF ls_payload_data-zzcwcust = 'C'.
+
+        SELECT SINGLE FROM ztlo_main
+        FIELDS zzcust_id
+        WHERE zzreqno = @ls_payload_data-zzreqno
+        INTO @DATA(lv_custid).
+        IF sy-subrc = 0 AND lv_custid IS NOT INITIAL.
+
+          SELECT SINGLE FROM ztlo_m_customer
+          FIELDS zzl_contact_no,
+                 zz_lead_email
+          WHERE zzcust_id = @lv_custid
+          INTO @DATA(ls_mailmsg).
+          IF sy-subrc = 0 AND ls_mailmsg IS NOT INITIAL.
+            ls_recipient-email_address = ls_mailmsg-zz_lead_email.
+            APPEND ls_recipient TO it_recipient.
+            CLEAR: ls_recipient.
+          ENDIF.
+        ENDIF.
+
+        IF ls_payload_data-zzmailmsg = 'M'.
+         lv_subject = 'Meeting with CWC'.
+        ENDIF.
+
+        IF ls_payload_data-zzmailmsg = 'S'.
+          CLEAR: lv_mobile.
+          lv_mobile = ls_mailmsg-zzl_contact_no.
+        ENDIF.
+
+      ENDIF.
+
+      IF it_recipient IS NOT INITIAL AND ls_payload_data-zzmailmsg = 'M'.
+      DATA : lv_date(10) TYPE c.
+        WRITE ls_payload_data-zznxtfollowup DD/MM/YYYY TO lv_date.
+
+        lv_sender = 'notifications@erpcwc.com'.
+
+        lt_mailbody = VALUE #(
+                              ( line = 'Dear Sir/Madam,<br>' )
+       ( line = |We would like to inform you that a meeting has been scheduled with CWC on { lv_date } regarding your service query.<br>| )
+                              ( line = |Remark:{ ls_payload_data-zznxtremark }.<br>| )
+                              ( line = ' <br>' )
+                              ( line = ' <br>' )
+                              ( line = |Subject         : { lv_subject }<br>| )
+                              ( line = ' ' )
+                              ( line = ' ' )
+                              ( line = ' ' )
+                              ( line = '************************************************************************************<br>' )
+                              ( line = |Note: Please DO NOT REPLY! This is an Auto Generated mail alert from Release System.<br>| )
+                              ( line = '************************************************************************************<br>' )
+                             ).
+
+**mail send-->
+        CALL METHOD zgclhr_common_utility=>send_mail
+          EXPORTING
+            iv_subject            = lv_subject
+            it_mail_body          = lt_mailbody                 " Text Table
+*           it_attachment         = it_attachment                " E-mail Attachment
+            it_recipient          = it_recipient                 " E-mail Recipients
+            iv_commit             = iv_commit               " General Flag
+            iv_sender             = lv_sender                 " E-Mail Address
+            iv_html               = iv_html                " Character Field of Length 1
+*           iv_send_immediate     =
+          IMPORTING
+            ev_msgtext            = DATA(lv_msgtext)                 " Message Text
+            ev_result             = DATA(lv_result1)                 " Boolean
+          EXCEPTIONS
+            exc_create_persistent = 1
+            exc_create_document   = 2
+            exc_subject_error     = 3
+            exc_add_attachment    = 4
+            exc_set_document      = 5
+            exc_sender_error      = 6
+            exc_recipient_error   = 7
+            exc_send_error        = 8
+            OTHERS                = 9.
+        IF sy-subrc <> 0.
+*           MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*             WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+        ENDIF.
+        lv_mailf = abap_true.
+      ENDIF.
+
+      IF lv_mobile IS NOT INITIAL.
+
+        lv_var1 = lv_date.
+
+        CALL FUNCTION 'ZFM_SMS_UTILITY_DIRECT'
+          EXPORTING
+            mobile       = lv_mobile
+           SMSID         = 'ZLEAD_OPP'
+           VAR1          = lv_var1
+
+          IMPORTING
+            return        = lv_subrc
+            error_message = lv_error.
+
+        IF lv_subrc IS INITIAL.
+          lv_msgf = abap_true.
+        ENDIF.
+
+      ENDIF.
+
+      IF lv_mailf = abap_true.
+        "Send success message to UI
+        lv_message_text = 'Added and Mail sent Successfully'.
+
+        CALL METHOD lo_message_container->add_message_text_only
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>success
+            iv_msg_text               = lv_message_text
+            iv_add_to_response_header = abap_true.
+
+      ENDIF.
+
+      IF lv_msgf = abap_true.
+        "Send success message to UI
+        lv_message_text = 'Added and Message sent Successfully'.
+
+        CALL METHOD lo_message_container->add_message_text_only
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>success
+            iv_msg_text               = lv_message_text
+            iv_add_to_response_header = abap_true.
+
+      ENDIF.
+
+    ENDIF.
+
+
+  ENDMETHOD.
+
+
+-----------------------------entityset--------------------------------------
+
+  METHOD showlogset_get_entityset.
+    DATA(lv_ReqNo) = VALUE #( it_filter_select_options[ property = 'ZZREQNO' ]-select_options[ 1 ]-low OPTIONAL ).
+    DATA: lv_pernr TYPE ess_emp-employeenumber.
+    DATA: lt_status_val TYPE TABLE OF dd07v.
+    DATA: lt_action_val TYPE TABLE OF dd07v.
+    DATA: lv_name TYPE emnam.
+    DATA: lv_Sent_name TYPE emnam.
+    DATA: lt_entityset TYPE zcl_z_lead_n_opporunit_mpc=>tt_showlog.
+
+
+
+    "Domain values for FORM
+
+    CALL FUNCTION 'GET_DOMAIN_VALUES'
+      EXPORTING
+        domname    = 'ZDOLO_STATUS'
+        text       = 'X'
+*       FILL_DD07L_TAB        = ' '
+      TABLES
+        values_tab = lt_status_val.
+
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    CALL FUNCTION 'GET_DOMAIN_VALUES'
+      EXPORTING
+        domname    = 'ZDOLO_ACTION'
+        text       = 'X'
+*       FILL_DD07L_TAB        = ' '
+      TABLES
+        values_tab = lt_action_val.
+
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    SELECT
+      FROM ztlo_workflow
+      FIELDS  zzseqno,
+              zzreqno,
+              zzcust_id,
+              zzsentto,
+              zzstatus,
+              zzsubstatus,
+              zzaction,
+              zzremarks,
+              zzchanged_by,
+              zzchanged_on
+      WHERE zzreqno = @lv_ReqNo
+      INTO TABLE @DATA(lt_workflow).
+    IF sy-subrc = 0.
+      SORT lt_workflow BY zzseqno DESCENDING.
+    ENDIF.
+
+    MOVE-CORRESPONDING lt_workflow TO lt_entityset.
+
+    LOOP AT lt_entityset ASSIGNING FIELD-SYMBOL(<lfs_workflow>).
+
+      DATA(lv_CurrPernr) = <lfs_workflow>-zzchanged_by.
+      DATA(lv_SentPernr) = <lfs_workflow>-zzsentto.
+
+      CALL FUNCTION 'HR_TMW_GET_EMPLOYEE_NAME'
+        EXPORTING
+          person_no    = CONV pernr_d( lv_CurrPernr )
+        IMPORTING
+          name_with_no = lv_name.
+
+
+       CALL FUNCTION 'HR_TMW_GET_EMPLOYEE_NAME'
+        EXPORTING
+          person_no    = CONV pernr_d( lv_SentPernr )
+        IMPORTING
+          name_with_no = lv_Sent_name.
+
+      <lfs_workflow>-zzstatus         = VALUE #( lt_status_val[ domvalue_l = <lfs_workflow>-zzstatus ]-ddtext OPTIONAL ).
+      <lfs_workflow>-zzaction         = VALUE #( lt_action_val[ domvalue_l = <lfs_workflow>-zzaction ]-ddtext OPTIONAL ).
+      <lfs_workflow>-zzchanged_by     = lv_name.
+      <lfs_workflow>-zzsentto         = lv_Sent_name.
+
+    ENDLOOP.
+
+    MOVE-CORRESPONDING lt_entityset TO et_entityset.
+
+  ENDMETHOD.
+
+
+--------------------------------------------------------------------------------------------------------
+
+
+  METHOD reportset_get_entityset.
+    DATA(lv_ActionFor) = VALUE #( it_filter_select_options[ property = 'ActionFor' ]-select_options[ 1 ]-low OPTIONAL ).
+    DATA(i_lead) = VALUE #( it_filter_select_options[ property = 'I_LEAD' ]-select_options[ 1 ]-low OPTIONAL ).
+    DATA(i_lead_st) = VALUE #( it_filter_select_options[ property = 'I_LEAD_ST' ]-select_options[ 1 ]-low OPTIONAL ).
+    DATA(i_ro) = VALUE #( it_filter_select_options[ property = 'I_RO' ]-select_options[ 1 ]-low OPTIONAL ).
+    DATA(i_from) = VALUE #( it_filter_select_options[ property = 'I_FROM' ]-select_options[ 1 ]-low OPTIONAL ).
+    DATA(i_to) = VALUE #( it_filter_select_options[ property = 'I_TO' ]-select_options[ 1 ]-low OPTIONAL ).
+    DATA: lv_flag TYPE boolean.
+
+    DATA: lv_pernr TYPE ess_emp-employeenumber.
+    DATA: lt_status_val TYPE TABLE OF dd07v.
+    DATA: lt_action_val TYPE TABLE OF dd07v.
+    DATA: lv_name TYPE emnam.
+    DATA: lv_Createdname TYPE emnam.
+    DATA: lt_entityset TYPE zcl_z_lead_n_opporunit_mpc=>tt_report.
+
+    DATA: lr_Lead TYPE RANGE OF ztlo_main-zzreqno.
+    DATA: lr_LEAD_ST TYPE RANGE OF ztlo_main-zzstatus.
+    DATA: lr_RO TYPE RANGE OF ztlo_main-zro.
+    DATA: lr_Date TYPE RANGE OF ztlo_main-zzcreated_on.
+
+    SPLIT i_lead_st AT ',' INTO DATA(lv_create) DATA(lv_process) DATA(lv_sucess) DATA(lv_close).
+
+
+*--------------------------------------------------Range-------------------------------------------------------------------*
+
+    IF i_lead <> 'null' .
+
+      lr_Lead =  VALUE #( sign = 'I'
+                    option = 'EQ'
+                   ( low = i_lead ) ).
+    ENDIF.
+
+    IF i_lead_st <> 'null' .
+
+      lr_LEAD_ST =  VALUE #( sign = 'I'
+                    option = 'EQ'
+                   ( low = lv_create )
+                   ( low = lv_process )
+                   ( low = lv_sucess )
+                   ( low = lv_close ) ).
+    ENDIF.
+
+    IF i_ro <> 'null' .
+      lr_RO =  VALUE #( sign = 'I'
+                       option = 'EQ'
+                      ( low = i_ro ) ).
+    ENDIF.
+
+    IF i_from <> 'null'.
+      lr_Date =  VALUE #( sign = 'I'
+                          option = 'BT'
+                         ( low = i_from
+                          high = i_to ) ).
+    ENDIF.
+*--------------------------------------------------Range-------------------------------------------------------------------*
+
+*--------------------------------------------------Domain-------------------------------------------------------------------*
+
+    "Domain values for FORM
+
+    CALL FUNCTION 'GET_DOMAIN_VALUES'
+      EXPORTING
+        domname    = 'ZDOLO_STATUS'
+        text       = 'X'
+*       FILL_DD07L_TAB        = ' '
+      TABLES
+        values_tab = lt_status_val.
+
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    CALL FUNCTION 'GET_DOMAIN_VALUES'
+      EXPORTING
+        domname    = 'ZDOLO_ACTION'
+        text       = 'X'
+*       FILL_DD07L_TAB        = ' '
+      TABLES
+        values_tab = lt_action_val.
+
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+*--------------------------------------------------Domain-------------------------------------------------------------------*
+
+
+
+*--------------------------------------------------FM for Employee Detail-------------------------------------------------------------------*
+
+    "get pernr from employee id.
+
+    CALL FUNCTION 'HR_GETEMPLOYEEDATA_FROMUSER'
+      EXPORTING
+        username                  = sy-uname
+      IMPORTING
+        employeenumber            = lv_pernr
+      EXCEPTIONS
+        user_not_found            = 1
+        countrygrouping_not_found = 2
+        infty_not_found           = 3
+        OTHERS                    = 4.
+    IF sy-subrc <> 0.
+    ENDIF.
+
+    CALL FUNCTION 'HR_TMW_GET_EMPLOYEE_NAME'
+      EXPORTING
+*       person_no    = CONV pernr_d( lv_pernr )
+        person_no    = lv_pernr
+      IMPORTING
+        name_with_no = lv_name.
+
+*--------------------------------------------------FM for Employee Detail-------------------------------------------------------------------*
+
+
+*--------------------------------------------------Select query-------------------------------------------------------------------*
+
+    SELECT SINGLE * FROM agr_users
+        WHERE agr_name = 'ZS_LO_AUTH'
+        AND uname    = @sy-uname
+        INTO @DATA(lv_subrc).
+
+    IF sy-subrc = 0.
+      lv_flag = abap_true.
+    ELSE.
+      lv_flag = abap_false.
+    ENDIF.
+*
+*    SELECT SINGLE
+*            FROM pa0001
+*            FIELDS btrtl
+*            WHERE pernr = @lv_pernr
+*             AND begda <= @sy-datum
+*             AND endda >= @sy-datum
+*            INTO @DATA(lv_ps).
+*    IF sy-subrc = 0.
+*
+*    ENDIF.
+
+    SELECT SINGLE
+        FROM pa0001 AS a
+        INNER JOIN Ztmm_plant AS b
+        ON a~btrtl = b~zwh
+       FIELDS b~zro
+        WHERE pernr = @lv_pernr
+        AND begda <= @sy-datum
+        AND endda >= @sy-datum
+       INTO @DATA(lv_ps).
+    IF sy-subrc = 0.
+    ENDIF.
+
+
+    SELECT  FROM ztlo_m_service
+      FIELDS zzcode,
+              zzdesc
+      INTO TABLE @DATA(lt_service_type).
+    IF sy-subrc = 0.
+
+    ENDIF.
+
+    SELECT FROM ztmm_plant
+    FIELDS  zro,
+            zwh,
+            zrodesc,
+            zwhdesc
+    INTO TABLE @DATA(lt_Plant).
+
+    SELECT   FROM t001w
+      FIELDS werks,
+             name1
+     INTO TABLE @DATA(lt_loaction).
+    IF sy-subrc = 0.
+
+    ENDIF.
+
+*--------------------------------------------------Select query-------------------------------------------------------------------*
+
+
+    IF lv_actionfor = 'RS'.                                       "report self
+
+
+      SELECT
+       FROM ztlo_main AS a
+       INNER JOIN Ztlo_m_customer AS b
+       ON a~zzcust_id = b~zzcust_id
+       INNER JOIN ztlo_workflow AS c
+       ON a~zzreqno = c~zzreqno
+         FIELDS  a~zzreqno,
+                 a~zzcust_id,
+                 a~zzpreloc,
+                 a~zzsourcecode,
+                 a~zzcampaigncode,
+                 a~zzservicecode,
+                 a~zzother_service,
+                 a~zzreference_pernr,
+                 a~zzsentto,
+                 a~zzstatus,
+                 a~zzaction,
+                 a~zzchanged_by,
+                 a~zzchanged_on,
+                 a~zzcreated_by,
+                 a~zzcreated_on,
+                 a~zzserviceothr,
+                 a~zzsourceothr,
+                 a~zzothrservicetyp,
+                 a~zzprelocothr,
+                 a~zzcommodityarea,
+                 a~zzbags,
+                 a~zztroad_from,
+                 a~zztroad_to,
+                 a~zztrail_from,
+                 a~zztrail_to,
+                 a~zro,
+                 b~zzlead_name,
+                 b~zzl_contact_no,
+                 b~zzalt_conc_no,
+                 b~zz_lead_email,
+                 b~zzcompy_name,
+                 b~zzaddr,
+                 b~zzlandmark,
+                 b~zzpincode,
+                 b~zzcity,
+                 b~zzdistrict,
+                 b~zzstate,
+                 b~zzcountry,
+                 b~zzcompy_phone,
+                 b~zzcompy_email,
+                 b~zzpan,
+                 b~zzgstin,
+                 c~zzseqno,
+                 c~zzremarks
+       WHERE
+         a~zzcreated_by = @lv_pernr
+        AND a~zzreqno IN @lr_lead
+        AND a~zzdelete <> 'X'
+        AND a~zzstatus IN @lr_lead_st
+        AND a~zro IN @lr_ro
+        AND a~zzcreated_on IN @lr_Date
+       INTO TABLE @DATA(lt_lead_details).
+      IF sy-subrc = 0.
+        SORT lt_lead_details BY zzreqno zzseqno DESCENDING.
+        DELETE ADJACENT DUPLICATES FROM lt_lead_details COMPARING zzreqno.
+        DELETE lt_lead_details WHERE zzstatus = '50'.
+      ENDIF.
+
+    ELSEIF lv_actionfor = 'RA'.                                             "report All
+
+
+      IF lv_flag = abap_false.
+
+        IF lr_ro IS INITIAL.
+
+          lr_ro = VALUE #( sign = 'I'
+                               option = 'EQ'
+                              ( low = lv_ps ) ).
+
+          "boc added by shubham kumar on 27.02.2026
+
+          select RO_CODE from zlo_ro_access into TABLE @data(lT_ro) where employee_id = @lv_pernr
+             AND YES_NO_SELECTOR = 'Y'.
+            if sy-subrc = 0.
+              loop at lt_ro INTO data(ls_ro).
+                APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_ro-ro_code ) TO lr_ro.
+                ENDLOOP.
+            endif.
+
+            "eoc added by shubham kumar on 27.02.2026
+
+        ENDIF.
+      ENDIF.
+
+      SELECT
+             FROM ztlo_main AS a
+             INNER JOIN Ztlo_m_customer AS b
+             ON a~zzcust_id = b~zzcust_id
+             INNER JOIN ztlo_workflow AS c
+             ON a~zzreqno = c~zzreqno
+               FIELDS  a~zzreqno,
+                       a~zzcust_id,
+                       a~zzpreloc,
+                       a~zzsourcecode,
+                       a~zzcampaigncode,
+                       a~zzservicecode,
+                       a~zzother_service,
+                       a~zzreference_pernr,
+                       a~zzsentto,
+                       a~zzstatus,
+                       a~zzaction,
+                       a~zzchanged_by,
+                       a~zzchanged_on,
+                       a~zzcreated_by,
+                       a~zzcreated_on,
+                       a~zzserviceothr,
+                       a~zzsourceothr,
+                       a~zzothrservicetyp,
+                       a~zzprelocothr,
+                       a~zzcommodityarea,
+                       a~zzbags,
+                       a~zztroad_from,
+                       a~zztroad_to,
+                       a~zztrail_from,
+                       a~zztrail_to,
+                       a~zro,
+                       b~zzlead_name,
+                       b~zzl_contact_no,
+                       b~zzalt_conc_no,
+                       b~zz_lead_email,
+                       b~zzcompy_name,
+                       b~zzaddr,
+                       b~zzlandmark,
+                       b~zzpincode,
+                       b~zzcity,
+                       b~zzdistrict,
+                       b~zzstate,
+                       b~zzcountry,
+                       b~zzcompy_phone,
+                       b~zzcompy_email,
+                       b~zzpan,
+                       b~zzgstin,
+                       c~zzseqno,
+                       c~zzremarks
+        WHERE a~zzreqno IN @lr_lead
+          AND a~zzstatus IN @lr_lead_st
+          AND a~zzdelete <> 'X'
+          AND a~zro IN @lr_ro
+          AND a~zzcreated_on IN @lr_Date
+             INTO TABLE @lt_lead_details.
+      IF sy-subrc = 0.
+        SORT lt_lead_details BY zzreqno zzseqno DESCENDING.
+        DELETE ADJACENT DUPLICATES FROM lt_lead_details COMPARING zzreqno.
+        DELETE lt_lead_details WHERE zzstatus = '50'.
+      ENDIF.
+
+    ELSEIF lv_actionfor = 'CS'.
+
+
+      SELECT
+           FROM ztlo_main AS a
+           INNER JOIN Ztlo_m_customer AS b
+           ON a~zzcust_id = b~zzcust_id
+           INNER JOIN ztlo_workflow AS c
+           ON a~zzreqno = c~zzreqno
+             FIELDS  a~zzreqno,
+                     a~zzcust_id,
+                     a~zzpreloc,
+                     a~zzsourcecode,
+                     a~zzcampaigncode,
+                     a~zzservicecode,
+                     a~zzother_service,
+                     a~zzreference_pernr,
+                     a~zzsentto,
+                     a~zzstatus,
+                     a~zzaction,
+                     a~zzchanged_by,
+                     a~zzchanged_on,
+                     a~zzcreated_by,
+                     a~zzcreated_on,
+                     a~zzserviceothr,
+                     a~zzsourceothr,
+                     a~zzothrservicetyp,
+                     a~zzprelocothr,
+                     a~zzcommodityarea,
+                     a~zzbags,
+                     a~zztroad_from,
+                     a~zztroad_to,
+                     a~zztrail_from,
+                     a~zztrail_to,
+                     a~zro,
+                     b~zzlead_name,
+                     b~zzl_contact_no,
+                     b~zzalt_conc_no,
+                     b~zz_lead_email,
+                     b~zzcompy_name,
+                     b~zzaddr,
+                     b~zzlandmark,
+                     b~zzpincode,
+                     b~zzcity,
+                     b~zzdistrict,
+                     b~zzstate,
+                     b~zzcountry,
+                     b~zzcompy_phone,
+                     b~zzcompy_email,
+                     b~zzpan,
+                     b~zzgstin,
+                     c~zzseqno,
+                     c~zzremarks
+     WHERE
+       a~zzcreated_by = @lv_pernr
+        AND a~zzdelete = 'X'
+        INTO TABLE @lt_lead_details.
+      IF sy-subrc = 0.
+        SORT lt_lead_details BY zzreqno zzseqno DESCENDING.
+        DELETE ADJACENT DUPLICATES FROM lt_lead_details COMPARING zzreqno.
+        DELETE lt_lead_details WHERE zzstatus = '50'.
+      ENDIF.
+
+    ELSEIF lv_actionfor = 'CA'.
+
+      IF lv_flag = abap_false.
+
+
+        IF lr_ro IS INITIAL.
+
+          lr_ro = VALUE #( sign = 'I'
+                               option = 'EQ'
+                              ( low = lv_ps ) ).
+        ENDIF.
+      ENDIF.
+
+
+      SELECT
+           FROM ztlo_main AS a
+           INNER JOIN Ztlo_m_customer AS b
+           ON a~zzcust_id = b~zzcust_id
+           INNER JOIN ztlo_workflow AS c
+           ON a~zzreqno = c~zzreqno
+             FIELDS  a~zzreqno,
+                     a~zzcust_id,
+                     a~zzpreloc,
+                     a~zzsourcecode,
+                     a~zzcampaigncode,
+                     a~zzservicecode,
+                     a~zzother_service,
+                     a~zzreference_pernr,
+                     a~zzsentto,
+                     a~zzstatus,
+                     a~zzaction,
+                     a~zzchanged_by,
+                     a~zzchanged_on,
+                     a~zzcreated_by,
+                     a~zzcreated_on,
+                     a~zzserviceothr,
+                     a~zzsourceothr,
+                     a~zzothrservicetyp,
+                     a~zzprelocothr,
+                     a~zzcommodityarea,
+                     a~zzbags,
+                     a~zztroad_from,
+                     a~zztroad_to,
+                     a~zztrail_from,
+                     a~zztrail_to,
+                     a~zro,
+                     b~zzlead_name,
+                     b~zzl_contact_no,
+                     b~zzalt_conc_no,
+                     b~zz_lead_email,
+                     b~zzcompy_name,
+                     b~zzaddr,
+                     b~zzlandmark,
+                     b~zzpincode,
+                     b~zzcity,
+                     b~zzdistrict,
+                     b~zzstate,
+                     b~zzcountry,
+                     b~zzcompy_phone,
+                     b~zzcompy_email,
+                     b~zzpan,
+                     b~zzgstin,
+                     c~zzseqno,
+                     c~zzremarks
+     WHERE a~zzdelete = 'X'
+        AND a~zro IN @lr_ro
+        INTO TABLE @lt_lead_details.
+      IF sy-subrc = 0.
+        SORT lt_lead_details BY zzreqno zzseqno DESCENDING.
+        DELETE ADJACENT DUPLICATES FROM lt_lead_details COMPARING zzreqno.
+        DELETE lt_lead_details WHERE zzstatus = '50'.
+      ENDIF.
+    ENDIF.
+
+    MOVE-CORRESPONDING lt_lead_details TO lt_entityset.
+
+    LOOP AT lt_entityset ASSIGNING FIELD-SYMBOL(<lfs_lead_details>).
+
+      DATA(lv_CurrPernr) = <lfs_lead_details>-zzchanged_by.
+
+      CALL FUNCTION 'HR_TMW_GET_EMPLOYEE_NAME'
+        EXPORTING
+          person_no    = CONV pernr_d( lv_CurrPernr )
+        IMPORTING
+          name_with_no = lv_name.
+
+      DATA(lv_CreatedPernr) = <lfs_lead_details>-zzcreated_by.
+
+      CALL FUNCTION 'HR_TMW_GET_EMPLOYEE_NAME'
+        EXPORTING
+          person_no    = CONV pernr_d( lv_CreatedPernr )
+        IMPORTING
+          name_with_no = lv_Createdname.
+
+      <lfs_lead_details>-zzstatustext     = VALUE #( lt_status_val[ domvalue_l = <lfs_lead_details>-zzstatus ]-ddtext OPTIONAL ).
+      <lfs_lead_details>-zzactiontext     = VALUE #( lt_action_val[ domvalue_l = <lfs_lead_details>-zzaction ]-ddtext OPTIONAL ).
+      <lfs_lead_details>-zzservicetext    = VALUE #( lt_service_type[ zzcode = <lfs_lead_details>-zzservicecode ]-zzdesc OPTIONAL ).
+      <lfs_lead_details>-zzservicetext    = VALUE #( lt_service_type[ zzcode = <lfs_lead_details>-zzservicecode ]-zzdesc OPTIONAL ).
+      <lfs_lead_details>-zzpreloc         = VALUE #( lt_plant[ zwh = <lfs_lead_details>-zzpreloc ]-zwhdesc OPTIONAL ).
+      <lfs_lead_details>-zro              = VALUE #( lt_plant[ zro = <lfs_lead_details>-zro ]-zrodesc OPTIONAL ).
+      <lfs_lead_details>-zzchanged_by     = lv_name.
+      <lfs_lead_details>-zzcreated_by     = lv_Createdname.
+    ENDLOOP.
+    SORT lt_entityset BY zzchanged_on DESCENDING.
+    MOVE-CORRESPONDING lt_entityset TO et_entityset.
+
+  ENDMETHOD.
+
+
+  METHOD employeelistset_get_entityset.
+
+    DATA: lt_entityset TYPE zcl_z_lead_n_opporunit_mpc=>tt_employeelist.
+*
+*    SELECT
+*      FROM pa0000 AS a
+*      INNER JOIN pa0001 AS b
+*      ON a~pernr = b~pernr
+*      INNER JOIN t500p AS c
+*      ON b~werks = c~persa
+*      INNER JOIN t001p AS d
+*      ON b~werks = d~werks
+*      AND b~btrtl = d~btrtl
+*      INNER JOIN hrp1000 AS e
+*      ON b~plans = e~objid
+*      FIELDS  a~pernr,
+*              b~ename,
+*              c~name1,
+*              d~btext,
+*              e~stext
+*      WHERE a~stat2 = '3'
+*       AND d~molga = '40'
+*      AND e~otype = 'S'
+*      AND e~plvar = '01'
+*      AND a~begda <= @sy-datum
+*      AND a~endda >= @sy-datum
+*      INTO CORRESPONDING FIELDS OF TABLE @et_entityset.
+*
+*    IF sy-subrc = 0.
+*      SORT et_entityset BY pernr.
+*      DELETE ADJACENT DUPLICATES FROM et_entityset COMPARING pernr.
+*    ENDIF.
+
+    SELECT
+      FROM Zthr_EMP_master
+      FIELDS
+          pernr,
+          emp_name          AS ename,
+          area_desp         AS name1,
+          sub_area_desp     AS btext,
+          position_disc     AS stext
+      INTO CORRESPONDING FIELDS OF TABLE @et_entityset.
+    IF sy-subrc IS INITIAL.
+      SORT et_entityset BY ename ASCENDING.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+--------------------------------------------------------------------------------------
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~create_deep_entity.
+    DATA: lo_message_container TYPE REF TO /iwbep/if_message_container,
+          lv_error_msg         TYPE bapi_msg.
+
+
+    DATA: lv_seq          TYPE ztwm_temp_log-seqno,
+          lv_pernr        TYPE ess_emp-employeenumber,
+          lv_message_text TYPE bapi_msg,
+          lv_fiscyear     TYPE gjahr,
+          lv_error        TYPE abap_bool VALUE abap_false,
+          lv_status       TYPE c LENGTH 2,
+          lv_uname        TYPE sy-uname.
+
+
+    CALL METHOD me->/iwbep/if_mgw_conv_srv_runtime~get_message_container
+      RECEIVING
+        ro_message_container = lo_message_container.
+
+    CALL FUNCTION 'HR_GETEMPLOYEEDATA_FROMUSER'
+      EXPORTING
+        username                  = sy-uname
+      IMPORTING
+        employeenumber            = lv_pernr
+      EXCEPTIONS
+        user_not_found            = 1
+        countrygrouping_not_found = 2
+        infty_not_found           = 3
+        OTHERS                    = 4.
+    IF sy-subrc <> 0.
+    ENDIF.
+    GET TIME STAMP FIELD DATA(lv_local_timestamp).
+
+
+    IF iv_entity_name = 'TempAdvHeader'.
+
+      DATA: BEGIN OF ls_payload_data.
+              INCLUDE TYPE zcl_zwm_temp_adv_mpc=>ts_tempadvheader.
+      DATA:   navheadertodetail TYPE STANDARD TABLE OF zcl_zwm_temp_adv_mpc=>ts_tempadvdetail.
+      DATA: END OF ls_payload_data.
+
+      DATA:  lt_detail   TYPE STANDARD TABLE OF zcl_zwm_temp_adv_mpc=>ts_tempadvdetail.
+
+
+      DATA: lt_ztwm_temp_detail TYPE STANDARD TABLE OF ztwm_temp_detail.
+
+
+
+      DATA: ls_ztwm_temp_master TYPE ztwm_temp_master,
+            ls_ztwm_temp_detail TYPE ztwm_temp_detail,
+            ls_ztwm_temp_log    TYPE ztwm_temp_log.
+
+
+      TRY.
+          io_data_provider->read_entry_data(
+            IMPORTING
+              es_data = ls_payload_data ).
+
+        CATCH: /iwbep/cx_mgw_tech_exception INTO DATA(lcx_mgw_tech_exception).
+      ENDTRY.
+
+      lt_detail = CORRESPONDING #( ls_payload_data-navheadertodetail ).
+
+
+
+      CALL FUNCTION 'FI_PERIOD_DETERMINE'
+        EXPORTING
+          i_periv = 'K4'
+          i_budat = sy-datum
+        IMPORTING
+          e_gjahr = lv_fiscyear
+        EXCEPTIONS
+          OTHERS  = 1.
+
+      IF ls_payload_data-reqno IS INITIAL.
+
+        SELECT SINGLE FROM ztwm_temp_master
+           FIELDS MAX( reqno )
+           INTO @DATA(lv_req).
+
+        IF lv_req IS NOT INITIAL.
+          IF lv_req(4) = lv_fiscyear.
+            lv_req += 1.
+          ELSE.
+            lv_req = |{ lv_fiscyear }000001|.
+          ENDIF.
+          CONDENSE lv_req.
+        ELSE.
+          lv_req = |{ lv_fiscyear }000001|.
+        ENDIF.
+        lv_seq = '1'.
+      ELSE.
+        SELECT SINGLE FROM ztwm_temp_log
+           FIELDS MAX( seqno )
+           WHERE reqno = @ls_payload_data-reqno
+           INTO @lv_seq.
+        lv_req = ls_payload_data-reqno.
+        lv_seq += 1.
+      ENDIF.
+
+      IF ls_payload_data-action = 'D'.
+        lv_status = '05'.
+      ELSE.
+        lv_status = '10'.
+      ENDIF.
+
+      CALL FUNCTION 'ENQUEUE_E_TABLE'
+        EXPORTING
+          tabname = 'ZTWM_TEMP_MASTER'
+        EXCEPTIONS
+          OTHERS  = 1.
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+
+
+*       IF ls_payload_data-warehouse = '1000'.
+*
+*        SELECT SINGLE
+*        FROM zthr_dept_head
+*        FIELDS
+*          uname
+*        WHERE department_id = @ls_payload_data-division
+*         AND type = '10'
+*        INTO @DATA(lv_uname).
+*      ELSE.
+*        SELECT SINGLE
+*        FROM zthr_dept_head
+*        FIELDS
+*           uname
+*        WHERE department_id = @ls_payload_data-division
+*          AND type = '20'
+*        INTO @lv_uname.
+*      ENDIF.
+
+
+      CALL FUNCTION 'HR_GET_USER_FROM_EMPLOYEE'
+        EXPORTING
+          pernr              = CONV pernr_d( ls_payload_data-apprpernr )
+        IMPORTING
+          user               = lv_uname
+        EXCEPTIONS
+          pernr_inactive     = 1
+          pernr_not_assigned = 2
+          OTHERS             = 3.
+
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+
+      "----------------- MASTER -----------------
+
+      ls_ztwm_temp_master-reqno           = lv_req.
+      ls_ztwm_temp_master-fyear           = ls_payload_data-fyear.
+      ls_ztwm_temp_master-warehouse       = ls_payload_data-warehouse.
+      ls_ztwm_temp_master-division        = ls_payload_data-division.
+      ls_ztwm_temp_master-req_amt         = ls_payload_data-req_amt.
+      ls_ztwm_temp_master-appr_amt        = ls_payload_data-req_amt.  "shubham on 31.01.2026
+      ls_ztwm_temp_master-rem_amt         = ls_payload_data-req_amt.   "shubham on 31.01.2026
+      ls_ztwm_temp_master-activity        = ls_payload_data-activity.
+      ls_ztwm_temp_master-status          = ls_payload_data-action.
+      ls_ztwm_temp_master-substatus       = ''.
+      ls_ztwm_temp_master-pendingwith     = ls_payload_data-apprpernr.
+      ls_ztwm_temp_master-created_by      = lv_pernr.
+      ls_ztwm_temp_master-created_on      = lv_local_timestamp.
+      ls_ztwm_temp_master-updated_by      = lv_pernr.
+      ls_ztwm_temp_master-updated_on      = lv_local_timestamp.
+
+      MODIFY ztwm_temp_master FROM ls_ztwm_temp_master.
+      IF sy-subrc <> 0.
+        lv_error = abap_true.
+      ENDIF.
+
+      "----------------- Detail -----------------
+      IF lv_error = abap_false.
+
+        LOOP AT lt_detail INTO DATA(ls_details).
+
+          ls_ztwm_temp_detail-reqno       = lv_req.
+          ls_ztwm_temp_detail-seqno       = sy-tabix.
+          ls_ztwm_temp_detail-warehouse   = ls_details-warehouse.
+          ls_ztwm_temp_detail-activity    = ls_details-activity.
+          ls_ztwm_temp_detail-hoe         = ls_details-hoe.
+          ls_ztwm_temp_detail-amount      = ls_details-amount.
+          ls_ztwm_temp_detail-updated_by  = lv_pernr.
+          ls_ztwm_temp_detail-updated_on  = lv_local_timestamp.
+
+          APPEND ls_ztwm_temp_detail TO lt_ztwm_temp_detail.
+          CLEAR ls_details.
+          CLEAR ls_ztwm_temp_detail.
+
+        ENDLOOP.
+
+        MODIFY ztwm_temp_detail FROM TABLE lt_ztwm_temp_detail.
+        IF sy-subrc <> 0.
+          lv_error = abap_true.
+        ENDIF.
+      ENDIF.
+
+
+      "----------------- LOG -----------------
+      IF lv_error = abap_false.
+
+        ls_ztwm_temp_log-seqno       = lv_seq.
+        ls_ztwm_temp_log-reqno       = lv_req.
+        ls_ztwm_temp_log-voucherreq  = ''.
+        ls_ztwm_temp_log-status      = ls_payload_data-action.
+        ls_ztwm_temp_log-sub_stat    = ''.
+        ls_ztwm_temp_log-remarks     = ls_payload_data-remarks.
+        ls_ztwm_temp_log-changed_by  = lv_pernr.
+        ls_ztwm_temp_log-changed_on  = lv_local_timestamp.
+
+        MODIFY ztwm_temp_log FROM ls_ztwm_temp_log.
+        IF sy-subrc <> 0.
+          lv_error = abap_true.
+        ENDIF.
+      ENDIF.
+
+      "----------------------Commit or rollback----------------------------------
+      IF lv_error = abap_true.
+        ROLLBACK WORK.
+*      RETURN.
+      ELSE.
+        COMMIT WORK AND WAIT.
+      ENDIF.
+
+      CALL FUNCTION 'DEQUEUE_E_TABLE'
+        EXPORTING
+          tabname = 'ZTMDM_AST_MASTER'.
+
+
+      IF lv_error = abap_false.
+
+        CALL METHOD lo_message_container->add_message_text_only
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>success
+            iv_msg_text               = | Temporary Advance request: { lv_req } submitted successfully.|
+            iv_add_to_response_header = abap_true.
+      ELSE.
+        CALL METHOD lo_message_container->add_message_text_only
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_text               = 'Error while submission.'
+            iv_add_to_response_header = abap_true.
+
+      ENDIF.
+
+      me->copy_data_to_ref(
+        EXPORTING
+          is_data = ls_payload_data
+        CHANGING
+          cr_data = er_deep_entity ).
+
+
+
+      DATA: lv_return_code    TYPE sy-subrc,
+            lv_workitem_id    TYPE swr_struct-workitemid,
+            lv_wf_triggered   TYPE abap_bool,
+            lv_wi_id          TYPE sww_wiid,
+            lt_msg            TYPE TABLE OF swr_messag,
+            rv_msg_type       TYPE bapi_mtype,
+            lv_user_id        TYPE sy-uname,
+            ls_vbsegs         TYPE vbsegs,
+            ls_vbsegk         TYPE vbsegk,
+            lw_fit_workfl_log TYPE zfit_workfl_log,
+            gv_vend_name      TYPE pa0001-ename.
+
+      DATA: lt_input_container TYPE STANDARD TABLE OF swr_cont.
+      DATA: ls_input_container TYPE  swcont.
+*      lv_user_id = 'SHUBHAMSB'.
+      lv_user_id = lv_uname.
+      APPEND INITIAL LINE TO lt_input_container
+                      ASSIGNING FIELD-SYMBOL(<lfs_input_container>).
+      <lfs_input_container>-element = 'GV_APPROVER'.
+      <lfs_input_container>-value   = |US{ lv_user_id }|.
+
+      APPEND INITIAL LINE TO lt_input_container
+      ASSIGNING <lfs_input_container>.
+      <lfs_input_container>-element = 'GV_TCODE'.
+      <lfs_input_container>-value   = 'ADV'.
+
+      APPEND INITIAL LINE TO lt_input_container
+      ASSIGNING <lfs_input_container>.
+      <lfs_input_container>-element = 'GV_TITLE'.
+      <lfs_input_container>-value   = 'Temporary Advance No.'.
+
+      APPEND INITIAL LINE TO lt_input_container
+      ASSIGNING <lfs_input_container>.
+      <lfs_input_container>-element = 'GV_DOCUMENT_NO'.
+      <lfs_input_container>-value   = lv_req.
+      DATA: lv_fy TYPE char4.
+      CALL FUNCTION 'GM_GET_FISCAL_YEAR'
+        EXPORTING
+          i_date = sy-datum
+          i_fyv  = 'V3'
+        IMPORTING
+          e_fy   = lv_fy
+*       EXCEPTIONS
+*         FISCAL_YEAR_DOES_NOT_EXIST       = 1
+*         NOT_DEFINED_FOR_DATE             = 2
+*         OTHERS = 3
+        .
+      IF sy-subrc <> 0.
+* Implement suitable error handling here
+      ENDIF.
+
+
+      APPEND INITIAL LINE TO lt_input_container
+      ASSIGNING <lfs_input_container>.
+      <lfs_input_container>-element = 'GV_YEAR'.
+*      <lfs_input_container>-value   = sy-datum+0(4).
+      <lfs_input_container>-value   = lv_fy.
+
+*            append initial line to lt_input_container
+*    assigning <lfs_input_container>.
+*            <lfs_input_container>-element = 'GV_COMPANY_CODE'.
+*            <lfs_input_container>-value   = xvbkpf-bukrs.
+
+      APPEND INITIAL LINE TO lt_input_container
+      ASSIGNING <lfs_input_container>.
+      <lfs_input_container>-element = 'GV_INITIATOR'.
+      <lfs_input_container>-value   = |US{ sy-uname }|.
+
+*            append initial line to lt_input_container
+*            assigning <lfs_input_container>.
+*            <lfs_input_container>-element = 'GV_VEND_NAME'.
+*            <lfs_input_container>-value   = gv_vend_name.
+
+      CALL FUNCTION 'SAP_WAPI_START_WORKFLOW'
+        EXPORTING
+*         task            = 'WS99800007'"'WS99800024'
+          task            = 'WS99800024'
+          user            = sy-uname
+        IMPORTING
+          return_code     = lv_return_code
+          workitem_id     = lv_workitem_id
+        TABLES
+          input_container = lt_input_container
+          message_lines   = lt_msg.
+
+      IF lv_return_code = 0.
+        IF lv_workitem_id IS NOT INITIAL.
+
+          lw_fit_workfl_log-belnr           = lv_req.
+          lw_fit_workfl_log-gjahr  = lv_fy.
+          lw_fit_workfl_log-w_id   = lv_workitem_id.
+          lw_fit_workfl_log-workflow_user = lv_user_id.
+          lw_fit_workfl_log-creation_date = sy-datum.
+          lw_fit_workfl_log-creation_time = sy-uzeit.
+          lw_fit_workfl_log-comments = 'Initiated'.
+          lw_fit_workfl_log-initiator = sy-uname.
+          lw_fit_workfl_log-workflow_template = 'WS99800024'."'WS99800024'.
+          lw_fit_workfl_log-status = '20'.
+          lw_fit_workfl_log-transaction_code = 'ADV'.  " ADDED BY SHUBHAM ON 13.09.25
+          MODIFY zfit_workfl_log FROM lw_fit_workfl_log.
+          DATA: ls_zfit_wf_log TYPE zfit_wf_log.
+          ls_zfit_wf_log-belnr = lv_req.
+          ls_zfit_wf_log-gjhar = lv_fy.
+          ls_zfit_wf_log-forward_to = lv_user_id.
+
+          MODIFY zfit_wf_log FROM ls_zfit_wf_log.
+        ENDIF.
+      ENDIF.
+    ELSEIF  iv_entity_name = 'TempVoucherHeader'.
+
+      CLEAR: lv_seq,
+             lv_req,
+             lv_fiscyear,
+             lv_error,
+             lv_status.
+
+      DATA: BEGIN OF ls_voucher_payload_data.
+              INCLUDE TYPE zcl_zwm_temp_adv_mpc=>ts_tempvoucherheader.
+      DATA:   navvoucherheadertodetail TYPE STANDARD TABLE OF zcl_zwm_temp_adv_mpc=>ts_tempvoucherdetail.
+      DATA: END OF ls_voucher_payload_data.
+
+      DATA:  lt_ledger   TYPE STANDARD TABLE OF zcl_zwm_temp_adv_mpc=>ts_tempvoucherdetail.
+
+      DATA: lt_ztwm_temp_ledger TYPE STANDARD TABLE OF ztwm_temp_ledger.
+
+      DATA: ls_ztwm_temp_vouch  TYPE ztwm_temp_vouch,
+            ls_ztwm_temp_ledger TYPE ztwm_temp_ledger,
+            ls_ztwm_temp_srv_pr TYPE ztwm_temp_srv_pr.
+
+
+
+      TRY.
+          io_data_provider->read_entry_data(
+            IMPORTING
+              es_data = ls_voucher_payload_data ).
+
+        CATCH: /iwbep/cx_mgw_tech_exception INTO lcx_mgw_tech_exception.
+      ENDTRY.
+
+      lt_ledger = CORRESPONDING #( ls_voucher_payload_data-navvoucherheadertodetail ).
+
+      CALL FUNCTION 'FI_PERIOD_DETERMINE'
+        EXPORTING
+          i_periv = 'K4'
+          i_budat = sy-datum
+        IMPORTING
+          e_gjahr = lv_fiscyear
+        EXCEPTIONS
+          OTHERS  = 1.
+
+      IF ls_voucher_payload_data-reqno IS NOT INITIAL.
+
+        IF ls_voucher_payload_data-voucherno IS INITIAL.
+
+          SELECT SINGLE FROM ztwm_temp_vouch
+            FIELDS MAX( voucherreq )
+            INTO @DATA(lv_vreq).
+
+          IF lv_vreq IS NOT INITIAL.
+            lv_vreq += 1.
+          ELSE.
+            lv_vreq = '1000000001'.
+*           lv_seq = '1'.
+          ENDIF.
+          CONDENSE lv_req.
+
+        ELSE.
+
+          lv_vreq = ls_voucher_payload_data-voucherno.
+
+          SELECT SINGLE * FROM ztwm_temp_vouch INTO @DATA(ls_vouch_temp)
+            WHERE reqno = @ls_voucher_payload_data-reqno AND voucherreq = @ls_voucher_payload_data-voucherno.
+        ENDIF.
+
+        SELECT SINGLE FROM ztwm_temp_log
+           FIELDS MAX( seqno )
+           WHERE reqno = @ls_voucher_payload_data-reqno
+           INTO @lv_seq.
+        lv_seq += 1.
+
+        CALL FUNCTION 'ENQUEUE_E_TABLE'
+          EXPORTING
+            tabname = 'ztwm_temp_master'
+          EXCEPTIONS
+            OTHERS  = 1.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+
+        "----------------- MASTER -----------------
+        DATA: lv_rem_amt type p DECIMALS 2.
+        DATA: lv_rej_amt type p DECIMALS 2.
+        DATA: lv_total_rem type p DECIMALS 2.
+
+        IF ls_vouch_temp-voucherreq IS INITIAL.
+
+          SELECT SINGLE rem_amt,appr_amt,rej_amt,unspent_amt,final_rem_amt FROM ztwm_temp_master
+             WHERE reqno = @ls_voucher_payload_data-reqno INTO @DATA(ls_rem_amt).
+
+          SELECT SUM( voucher_amt ) FROM ztwm_temp_vouch INTO @DATA(lv_total) WHERE reqno = @ls_voucher_payload_data-reqno.
+
+*          DATA(lv_rem_amt) = ls_rem_amt-appr_amt - ( lv_total + ls_voucher_payload_data-totalamt ). "11.06.2026
+
+             " new
+
+             IF ls_rem_amt-rej_amt > 0.
+
+             lv_rej_amt = ls_rem_amt-rej_amt - ls_vouch_temp-voucher_amt.
+              LV_REM_AMT = ls_rem_amt-rem_amt + ls_vouch_temp-voucher_amt - ls_voucher_payload_data-totalamt.
+            lv_total_rem = lv_rem_amt + lv_rej_amt - ls_rem_amt-unspent_amt.
+
+            else.
+
+              lv_rej_amt = 0.
+            "
+
+            LV_REM_AMT = ls_rem_amt-rem_amt + ls_vouch_temp-voucher_amt - ls_voucher_payload_data-totalamt.
+            lv_total_rem = lv_rem_amt + lv_rej_amt - ls_rem_amt-unspent_amt.
+
+            "end new
+
+
+              endif.
+
+        ELSE. "shubham on 20.04.2026
+
+          SELECT SUM( voucher_amt ) FROM ztwm_temp_vouch INTO @lv_total WHERE reqno = @ls_voucher_payload_data-reqno.
+
+          SELECT SINGLE rem_amt,appr_amt,rej_amt,unspent_amt,final_rem_amt FROM ztwm_temp_master
+            WHERE reqno = @ls_voucher_payload_data-reqno INTO @ls_rem_amt.
+
+          "BOC ADDED BY SHUBHAM ON 11.06.2026
+
+          data: lv_limit TYPE p DECIMALS 2.
+
+          lv_limit = ls_rem_amt-appr_amt - ls_rem_amt-unspent_amt - lv_total + ls_rem_amt-rej_amt.
+          lv_limit = lv_limit - ls_voucher_payload_data-totalamt..
+          lv_limit = lv_limit + ls_vouch_temp-voucher_amt. "12.06.2026
+
+          IF ls_rem_amt-rej_amt > 0.
+
+*            DATA(LV_REJ_AMT) = ls_rem_amt-rej_amt - ls_voucher_payload_data-totalamt.
+*            LV_REM_AMT = ls_rem_amt-rem_amt + lv_rej_amt.
+           "new logic
+           if ls_vouch_temp-flag = 'R'.
+            lv_rej_amt = ls_rem_amt-rej_amt - ls_vouch_temp-voucher_amt.
+           ELSE.
+             lv_rej_amt = ls_rem_amt-rej_amt.
+            ENDIF.
+            LV_REM_AMT = ls_rem_amt-rem_amt + ls_vouch_temp-voucher_amt - ls_voucher_payload_data-totalamt.
+            lv_total_rem = lv_rem_amt + lv_rej_amt - ls_rem_amt-unspent_amt.
+
+            "end new logic
+          ELSE.
+            lv_rej_amt = 0.
+            "
+
+            LV_REM_AMT = ls_rem_amt-rem_amt + ls_vouch_temp-voucher_amt - ls_voucher_payload_data-totalamt.
+            lv_total_rem = lv_rem_amt + lv_rej_amt - ls_rem_amt-unspent_amt.
+
+            "
+*            lv_total = lv_total - ls_vouch_temp-voucher_amt.
+*            lv_total = lv_total + ls_voucher_payload_data-totalamt.
+*            lv_rem_amt = ls_rem_amt-appr_amt - lv_total.
+          ENDIF.
+
+          IF lv_limit < 0 OR lv_total_rem < 0.
+
+            lv_error = abap_true.
+            DATA(lv_amount_error) = 'Amount is greater than approved amount'.
+
+          ENDIF.
+
+          "EOC ADDED BY SHUBHAM
+
+          "BOC COMMENTED BY SHUBHAM ON 11.06.2026
+
+*          lv_total = lv_total - ls_vouch_temp-voucher_amt.
+*          lv_total = lv_total + ls_voucher_payload_data-totalamt.
+*
+*          lv_rem_amt = ls_rem_amt-appr_amt - lv_total.
+*
+*          IF lv_total > ls_rem_amt-appr_amt.
+*
+*            lv_error = abap_true.
+*            lv_amount_error = 'Amount is greater than approved amount'.
+*
+*          ENDIF.
+
+          "EOC COMMENTED BY SHUBHAM
+
+        ENDIF.
+        IF lv_error = abap_false.
+          IF ls_vouch_temp  IS NOT INITIAL AND ls_vouch_temp-status EQ '31'.
+
+            UPDATE ztwm_temp_master
+            SET status     = @ls_vouch_temp-status,
+                rem_amt    = @lv_rem_amt,
+                rej_amt = @lv_rej_amt, "11.06.2026
+                FINAL_REM_AMT = @lv_total_rem, "11.06.2026
+                updated_by = @lv_pernr,
+                updated_on = @lv_local_timestamp
+          WHERE reqno      = @ls_voucher_payload_data-reqno.
+
+            IF sy-subrc IS INITIAL.
+              lv_error = abap_false.
+            ENDIF.
+
+          ELSE.
+
+            UPDATE ztwm_temp_master
+*             SET status     = '25',
+             SET status     = '30',
+                 rem_amt    = @lv_rem_amt,
+                 rej_amt = @lv_rej_amt, "11.06.2026
+                  FINAL_REM_AMT = @lv_total_rem, "11.06.2026
+                 updated_by = @lv_pernr,
+                 updated_on = @lv_local_timestamp
+           WHERE reqno      = @ls_voucher_payload_data-reqno.
+
+            IF sy-subrc IS INITIAL.
+              lv_error = abap_false.
+            ENDIF.
+
+          ENDIF.
+
+        ENDIF.
+
+        "----------------- Voucher -----------------
+        IF lv_error = abap_false.
+
+          ls_ztwm_temp_vouch-reqno                = ls_voucher_payload_data-reqno.
+          ls_ztwm_temp_vouch-voucherreq           = lv_vreq.
+          ls_ztwm_temp_vouch-fyear                = ls_voucher_payload_data-fiscalyear.
+          IF ls_vouch_temp IS NOT INITIAL.
+            ls_ztwm_temp_vouch-activity             = ls_vouch_temp-activity.
+          ELSE.
+            ls_ztwm_temp_vouch-activity             = ls_voucher_payload_data-activity.
+          ENDIF.
+          ls_ztwm_temp_vouch-tokenno              = ls_voucher_payload_data-reqno.
+          ls_ztwm_temp_vouch-appr_amt             = ls_voucher_payload_data-appramt.
+          ls_ztwm_temp_vouch-remain_amt           = lv_rem_amt.
+          ls_ztwm_temp_vouch-voucher_date         = ls_voucher_payload_data-voucher_date.
+          ls_ztwm_temp_vouch-purch_billno         = ls_voucher_payload_data-purch_billno.
+          ls_ztwm_temp_vouch-date_of_exp          = ls_voucher_payload_data-date_of_exp.
+          ls_ztwm_temp_vouch-exp_ledg_typ         = ls_voucher_payload_data-explegdertype.
+          ls_ztwm_temp_vouch-vend_typ             = ls_voucher_payload_data-vendortype.
+          ls_ztwm_temp_vouch-is_vend_req          = ls_voucher_payload_data-isvendor.
+          ls_ztwm_temp_vouch-vendor               = ls_voucher_payload_data-vendor.
+          ls_ztwm_temp_vouch-taxtype              = ls_voucher_payload_data-taxtype.
+          ls_ztwm_temp_vouch-voucher_amt          = ls_voucher_payload_data-totalamt.
+          IF ls_vouch_temp IS NOT INITIAL.
+            ls_ztwm_temp_vouch-rm_aprvd = ls_vouch_temp-rm_aprvd.
+            if ls_vouch_temp-status = '36'.
+               ls_ztwm_temp_vouch-status               = '30'.
+            else.
+            ls_ztwm_temp_vouch-status               = ls_vouch_temp-status.
+            endif.
+            ls_ztwm_temp_vouch-pendingwith          = ls_vouch_temp-pendingwith.
+            ls_ztwm_temp_vouch-updated_by           = ls_vouch_temp-updated_by.  "SHUBHAM ON 26.05.2026
+            ls_ztwm_temp_vouch-updated_on           =   ls_vouch_temp-updated_on.   "SHUBHAM ON 26.05.2026
+          ELSE.
+            ls_ztwm_temp_vouch-status               = '30'.
+            ls_ztwm_temp_vouch-pendingwith          = ls_voucher_payload_data-fiapprpernr.
+            ls_ztwm_temp_vouch-updated_by           = lv_pernr.
+            ls_ztwm_temp_vouch-updated_on           = lv_local_timestamp.
+          ENDIF.
+
+
+          MODIFY ztwm_temp_vouch FROM ls_ztwm_temp_vouch.
+          IF sy-subrc <> 0.
+            lv_error = abap_true.
+          ENDIF.
+        ENDIF.
+        "----------------- Service Provider -----------------
+
+        IF lv_error = abap_false.
+
+          ls_ztwm_temp_srv_pr-reqno        = ls_voucher_payload_data-reqno.
+          ls_ztwm_temp_srv_pr-voucherreq   = lv_vreq.
+          ls_ztwm_temp_srv_pr-name         = ls_voucher_payload_data-providername.
+          ls_ztwm_temp_srv_pr-state        = ls_voucher_payload_data-providerstate.
+          ls_ztwm_temp_srv_pr-gstin        = ls_voucher_payload_data-providergstin.
+          ls_ztwm_temp_srv_pr-address      = ls_voucher_payload_data-provideraddress.
+          ls_ztwm_temp_srv_pr-pincode      = ls_voucher_payload_data-providerpincode.
+          ls_ztwm_temp_srv_pr-updated_by   = lv_pernr.
+          ls_ztwm_temp_srv_pr-updated_on   = lv_local_timestamp.
+
+          MODIFY ztwm_temp_srv_pr FROM ls_ztwm_temp_srv_pr.
+          IF sy-subrc <> 0.
+            lv_error = abap_true.
+          ENDIF.
+        ENDIF.
+
+        "----------------- Ledger -----------------
+        IF lv_error = abap_false.
+          DATA: lv_anln1 TYPE anla-anln1.
+          LOOP AT lt_ledger INTO DATA(ls_edger).
+
+            IF ls_edger-assetno IS NOT INITIAL.  "shubham on 23.02.2026
+              lv_anln1 = |{ ls_edger-assetno ALPHA = IN }|.
+*              lv_comp  = <lfs_req>-header-comp_code.
+              SELECT SINGLE FROM anla
+              FIELDS *
+              WHERE bukrs = '1000'
+              AND   anln1 = @lv_anln1
+*    AND   anln2 = @<lfs_item>-sub_number
+              INTO @DATA(ls_anla).
+              IF sy-subrc = 0 AND ls_anla IS NOT INITIAL.
+                SELECT SINGLE FROM t095
+                FIELDS *
+                WHERE ktopl = '1000'
+                AND   ktogr = @ls_anla-anlkl
+                INTO @DATA(ls_t095).
+                IF sy-subrc = 0 AND ls_t095 IS NOT INITIAL.
+                  ls_edger-legder = ls_t095-ktansw.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+
+            ls_ztwm_temp_ledger-asset =     ls_edger-assetno.
+            ls_ztwm_temp_ledger-asset_class_desc = ls_voucher_payload_data-desc.  "shubham on 20.05.2026
+            ls_ztwm_temp_ledger-asset_class = ls_voucher_payload_data-assetclass.  "shubham on 20.05.2026
+            ls_ztwm_temp_ledger-seqno             = sy-tabix.
+            ls_ztwm_temp_ledger-reqno             = ls_voucher_payload_data-reqno.
+            ls_ztwm_temp_ledger-voucherreqno      = lv_vreq.
+            ls_ztwm_temp_ledger-ledgercode        = ls_edger-legder.
+*            ls_ZTWM_TEMP_LEDGER-description = ls_edger-description.
+            ls_ztwm_temp_ledger-hsnsaccode        = ls_edger-hsn.
+            ls_ztwm_temp_ledger-amount            = ls_edger-amount.
+            ls_ztwm_temp_ledger-taxcode           = ls_edger-taxcode.
+            ls_ztwm_temp_ledger-percent           = ls_edger-percent.
+            ls_ztwm_temp_ledger-amount_gst        = ls_edger-amount_gst.
+            ls_ztwm_temp_ledger-updated_by        = lv_pernr.
+            ls_ztwm_temp_ledger-updated_on        = lv_local_timestamp.
+
+            APPEND ls_ztwm_temp_ledger TO lt_ztwm_temp_ledger.
+            CLEAR ls_edger.
+            CLEAR ls_ztwm_temp_ledger.
+
+          ENDLOOP.
+
+          MODIFY ztwm_temp_ledger FROM TABLE lt_ztwm_temp_ledger.
+          IF sy-subrc <> 0.
+            lv_error = abap_true.
+          ENDIF.
+        ENDIF.
+
+
+        "----------------- LOG -----------------
+        IF lv_error = abap_false.
+
+          ls_ztwm_temp_log-seqno        = lv_seq.
+          ls_ztwm_temp_log-reqno        =  ls_voucher_payload_data-reqno.
+          ls_ztwm_temp_log-voucherreq   =  lv_vreq.
+          ls_ztwm_temp_log-status       = '30'.
+          ls_ztwm_temp_log-sub_stat     = ''.
+          ls_ztwm_temp_log-remarks      = ls_voucher_payload_data-remarks.
+          ls_ztwm_temp_log-changed_by   = lv_pernr.
+          ls_ztwm_temp_log-changed_on   = lv_local_timestamp.
+
+          MODIFY ztwm_temp_log FROM ls_ztwm_temp_log.
+          IF sy-subrc <> 0.
+            lv_error = abap_true.
+          ENDIF.
+        ENDIF.
+
+        "----------------------Commit or rollback----------------------------------
+        IF lv_error = abap_true.
+          ROLLBACK WORK.
+*      RETURN.
+        ELSE.
+          COMMIT WORK AND WAIT.
+        ENDIF.
+
+        CALL FUNCTION 'DEQUEUE_E_TABLE'
+          EXPORTING
+            tabname = 'ZTMDM_AST_MASTER'.
+
+
+        IF lv_error = abap_false.
+
+          "BOC shubham on 20.04.2026
+
+          SELECT * FROM ztwm_temp_vouch INTO TABLE @DATA(lt_final_vouch)
+            WHERE reqno = @ls_voucher_payload_data-reqno.
+
+          SORT lt_final_vouch BY voucherreq ASCENDING.
+
+          DATA: lv_rem_amnt TYPE dmbtr.
+
+          LOOP AT lt_final_vouch ASSIGNING FIELD-SYMBOL(<lfs_vou>).
+            IF sy-tabix = 1.
+              <lfs_vou>-remain_amt = <lfs_vou>-appr_amt - <lfs_vou>-voucher_amt.
+              lv_rem_amnt = <lfs_vou>-remain_amt.
+            ELSE.
+              <lfs_vou>-remain_amt = lv_rem_amnt - <lfs_vou>-voucher_amt.
+              lv_rem_amnt = <lfs_vou>-remain_amt.
+            ENDIF.
+
+          ENDLOOP.
+
+          MODIFY ztwm_temp_vouch FROM TABLE lt_final_vouch.
+          COMMIT WORK.
+
+          "EOC shubham on 20.04.2026
+
+          CALL METHOD lo_message_container->add_message_text_only
+            EXPORTING
+              iv_msg_type               = /iwbep/cl_cos_logger=>success
+              iv_msg_text               = | Voucher request: { lv_vreq } submitted successfully for Request Number: { ls_voucher_payload_data-reqno }.|
+              iv_add_to_response_header = abap_true.
+        ELSE.
+          IF lv_amount_error IS INITIAL.
+            CALL METHOD lo_message_container->add_message_text_only
+              EXPORTING
+                iv_msg_type               = /iwbep/cl_cos_logger=>error
+                iv_msg_text               = 'Error while submission.'
+                iv_add_to_response_header = abap_true.
+          ELSE.
+            CALL METHOD lo_message_container->add_message_text_only
+              EXPORTING
+                iv_msg_type               = /iwbep/cl_cos_logger=>error
+                iv_msg_text               = 'Amount is greater than approved amount'
+                iv_add_to_response_header = abap_true.
+          ENDIF.
+
+        ENDIF.
+
+        me->copy_data_to_ref(
+          EXPORTING
+            is_data = ls_voucher_payload_data
+          CHANGING
+            cr_data = er_deep_entity ).
+*         SELECT SINGLE * FROM ztwm_temp_master INTO @DATA(LS_MAST) WHERE reqno = @ls_voucher_payload_data-reqno.
+*        IF ls_voucher_payload_data-warehouse = '1000'.
+*        SELECT SINGLE
+*        FROM zthr_dept_head
+*        FIELDS
+*          uname
+*        WHERE department_id = @ls_mast-division
+*         AND type = '10'
+*        INTO @lv_uname.
+*      ELSE.
+*        SELECT SINGLE
+*        FROM zthr_dept_head
+*        FIELDS
+*           uname
+*        WHERE department_id = @ls_mast-division
+*          AND type = '20'
+*        INTO @lv_uname.
+*      ENDIF.
+**        lv_user_id = 'ABHISHEKS'.
+***           lv_user_id = lv_uname.
+**        APPEND INITIAL LINE TO lt_input_container
+**                        ASSIGNING <lfs_input_container>.
+**        <lfs_input_container>-element = 'GV_APPROVER'.
+**        <lfs_input_container>-value   = |US{ lv_user_id }|.
+**
+**        APPEND INITIAL LINE TO lt_input_container
+**        ASSIGNING <lfs_input_container>.
+**        <lfs_input_container>-element = 'GV_TCODE'.
+**        <lfs_input_container>-value   = 'TEMP_INV'.
+**
+**        APPEND INITIAL LINE TO lt_input_container
+**        ASSIGNING <lfs_input_container>.
+**        <lfs_input_container>-element = 'GV_TITLE'.
+**        <lfs_input_container>-value   = 'Voucher No.'.
+**
+**        APPEND INITIAL LINE TO lt_input_container
+**        ASSIGNING <lfs_input_container>.
+**        <lfs_input_container>-element = 'GV_DOCUMENT_NO'.
+**        <lfs_input_container>-value   = lv_vreq.
+**
+**        APPEND INITIAL LINE TO lt_input_container
+**        ASSIGNING <lfs_input_container>.
+**        <lfs_input_container>-element = 'GV_YEAR'.
+**        <lfs_input_container>-value   = sy-datum+0(4).
+**
+***            append initial line to lt_input_container
+***    assigning <lfs_input_container>.
+***            <lfs_input_container>-element = 'GV_COMPANY_CODE'.
+***            <lfs_input_container>-value   = xvbkpf-bukrs.
+**
+**        APPEND INITIAL LINE TO lt_input_container
+**        ASSIGNING <lfs_input_container>.
+**        <lfs_input_container>-element = 'GV_INITIATOR'.
+**        <lfs_input_container>-value   = |US{ sy-uname }|.
+**
+***            append initial line to lt_input_container
+***            assigning <lfs_input_container>.
+***            <lfs_input_container>-element = 'GV_VEND_NAME'.
+***            <lfs_input_container>-value   = gv_vend_name.
+**
+**        CALL FUNCTION 'SAP_WAPI_START_WORKFLOW'
+**          EXPORTING
+***           task            = 'WS99800007'"'WS99800024'
+**            task            = 'WS99800024'
+**            user            = sy-uname
+**          IMPORTING
+**            return_code     = lv_return_code
+**            workitem_id     = lv_workitem_id
+**          TABLES
+**            input_container = lt_input_container
+**            message_lines   = lt_msg.
+**
+**        IF lv_return_code = 0.
+**          IF lv_workitem_id IS NOT INITIAL.
+**
+**            lw_FIT_WORKFL_LOG-belnr           = lv_vreq.
+**            lw_FIT_WORKFL_LOG-gjahr  = sy-datum+0(4).
+**            lw_FIT_WORKFL_LOG-w_id   = lv_workitem_id.
+**            lw_FIT_WORKFL_LOG-workflow_user = lv_user_id.
+**            lw_FIT_WORKFL_LOG-creation_date = sy-datum.
+**            lw_FIT_WORKFL_LOG-creation_time = sy-uzeit.
+**            lw_FIT_WORKFL_LOG-comments = 'Initiated'.
+**            lw_FIT_WORKFL_LOG-initiator = sy-uname.
+**            lw_FIT_WORKFL_LOG-workflow_template = 'WS99800024'."'WS99800024'.
+**            lw_FIT_WORKFL_LOG-status = '20'.
+**            lw_FIT_WORKFL_LOG-transaction_code = 'TEMP_INV'.  " ADDED BY SHUBHAM ON 13.09.25
+**            MODIFY zfit_workfl_log FROM lw_FIT_WORKFL_LOG.
+***          DATA: ls_zfit_wf_log TYPE zfit_wf_log.
+**            ls_zfit_wf_log-belnr = lv_vreq.
+**            ls_zfit_wf_log-gjhar = sy-datum+0(4).
+**            ls_zfit_wf_log-forward_to = lv_user_id.
+**
+**            MODIFY zfit_wf_log FROM ls_zfit_wf_log.
+**          ENDIF.
+**        ENDIF.
+
+      ENDIF.
+
+    ELSEIF iv_entity_name = 'VoucherLedgerHeader'.
+
+      DATA: BEGIN OF ls_payload_ledger_data.
+              INCLUDE TYPE zcl_zwm_temp_adv_mpc=>ts_voucherledgerheader.
+      DATA:   navvoucherledgerheadertodetail TYPE STANDARD TABLE OF zcl_zwm_temp_adv_mpc=>ts_voucherledgerdetail.
+      DATA: END OF ls_payload_ledger_data.
+
+      DATA:  lt_vledger   TYPE STANDARD TABLE OF zcl_zwm_temp_adv_mpc=>ts_voucherledgerdetail.
+*
+*      DATA:  lt_detail   TYPE STANDARD TABLE OF zcl_zwm_temp_adv_mpc=>ts_tempadvdetail.
+*
+*
+*      DATA: lt_ztwm_temp_detail TYPE STANDARD TABLE OF ztwm_temp_detail.
+
+      TRY.
+          io_data_provider->read_entry_data(
+            IMPORTING
+              es_data = ls_payload_ledger_data ).
+
+        CATCH: /iwbep/cx_mgw_tech_exception INTO lcx_mgw_tech_exception.
+      ENDTRY.
+
+      lt_vledger = CORRESPONDING #( ls_payload_ledger_data-navvoucherledgerheadertodetail ).
+      DATA: lt_led TYPE STANDARD TABLE OF ztwm_temp_ledger.
+      LOOP AT lt_vledger ASSIGNING FIELD-SYMBOL(<lfs_vled>).
+        SELECT SINGLE * FROM ztwm_temp_ledger INTO @DATA(ls_led) WHERE reqno = @<lfs_vled>-reqno
+          AND voucherreqno = @<lfs_vled>-voucherno AND ledgercode = @<lfs_vled>-ledgerno.
+        IF sy-subrc = 0.
+          ls_led-taxcode = <lfs_vled>-taxcode.
+          APPEND ls_led TO lt_led.
+          CLEAR: ls_led.
+        ENDIF.
+      ENDLOOP.
+
+      MODIFY ztwm_temp_ledger FROM TABLE lt_led.
+      COMMIT WORK.
+
+      CALL METHOD lo_message_container->add_message_text_only
+        EXPORTING
+          iv_msg_type               = /iwbep/cl_cos_logger=>success
+          iv_msg_text               = | Data Saved successfully|
+          iv_add_to_response_header = abap_true.
+
+      me->copy_data_to_ref(
+        EXPORTING
+          is_data = ls_voucher_payload_data
+        CHANGING
+          cr_data = er_deep_entity ).
+
+    ENDIF.
+  ENDMETHOD.
+
+-----------------------------------------------------------------
+
+  method F4_STATUSFILTERS_GET_ENTITYSET.
+
+    data: ls_entity type zcl_zwm_temp_adv_mpc=>ts_f4_statusfilter.
+    DATA: lt_values TYPE TABLE OF dd07v,
+      ls_value  TYPE dd07v.
+
+CALL FUNCTION 'DD_DOMVALUES_GET'
+  EXPORTING
+    domname        = 'ZDOWM_STATUS'
+    text           = 'X'
+    langu          = sy-langu
+  TABLES
+    dd07v_tab      = lt_values
+  EXCEPTIONS
+    wrong_textflag = 1
+    OTHERS         = 2.
+
+LOOP AT lt_values INTO ls_value.
+  ls_entity-key = ls_value-domvalue_l.
+  ls_entity-value = ls_value-ddtext.
+
+  APPEND ls_entity TO et_entityset.
+  CLEAR: ls_entity.
+ENDLOOP.
+  endmethod.
